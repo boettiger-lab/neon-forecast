@@ -19,5 +19,11 @@ beetle <- loadByProduct(dpID="DP1.10022.001", site="all", package="expanded", ch
 mozzie <- loadByProduct(dpID="DP1.10043.001", site="all", package="expanded", check.size = FALSE)
 ```
 
+```{r}
+saveRDS(beetle, "cache/beetle.rds")
+saveRDS(bird, "cache/bird.rds")
+saveRDS(mozzie, "cache/mozzie.rds")
+```
+
 
 
