@@ -32,12 +32,13 @@ mozzie <- readRDS("cache/mozzie.rds")
 ```
 
 ```{r}
-# names(bird)
+#bird$variables_10003 %>% View()
+
 brd_df <- bird$brd_countdata
 brd_df %>% names()
 brd_df %>% count(taxonRank, sort=TRUE)
 brd_df %>% count(siteID, sort=TRUE) # 74 sites
-brd_df %>% count(plotID, sort=TRUE) # 634 plots
+brd_df %>% select(plotID, startData) # 634 plots
 ```
 
 ```{r}
@@ -60,13 +61,52 @@ common <- brd %>% count(scientificName, sort=TRUE) %>% head(5)
 
 
 ````{r}
-brd_site %>% 
+brd %>% 
   inner_join(common) %>% 
-  ggplot(aes(startDate, siteCountMinute, col=siteID)) + geom_point() + facet_wrap(~scientificName)
+  ggplot(aes(startDate, totalCountMinute)) + geom_point() + facet_wrap(~scientificName)
 
-brd_site %>% 
+
+library(lubridate)
+names(bird$brd_countdata)
+
+bird$brd_countdata %>% 
+  mutate(year = year(startDate)) %>% 
   filter(scientificName == "Zenaida macroura", siteID == "CPER") %>% 
-  ggplot(aes(startDate, siteCountMinute)) + geom_point() + facet_wrap(~siteID)
+  select(identifiedBy, eventID, plotID, startDate, clusterSize) %>% 
+  arrange(plotID)
+
+
+
+
+bird$brd_countdata %>% select(eventID, scientificName, identifiedBy, detectionMethod) %>% distinct() %>% count(eventID, detectionMethod, scientificName, sort = TRUE)
+
+bird$brd_countdata %>% filter(scientificName == "Zenaida macroura") %>% count(eventID, sort=TRUE)
+
+bird$brd_countdata%>% filter(scientificName == "Zenaida macroura")  %>% filter(eventID == "LAJA_019.21.2018-05-26T08:25-04:00[America/Puerto_Rico]") %>% select(identifiedBy, pointCountMinute, clusterSize, observerDistance, detectionMethod, uid, eventID, scientificName)
+
+bird$brd_countdata%>% filter(scientificName == "Zenaida macroura")  %>% filter(eventID == "STER_035.21.2018-05-20T05:45-06:00[US/Mountain]")%>% select(identifiedBy, pointCountMinute, clusterSize, observerDistance, detectionMethod, uid, eventID, scientificName)
+
+
+bird$brd_countdata %>% filter(eventID == "LAJA_001.21.2018-05-26T07:01-04:00[America/Puerto_Rico]") %>% select(identifiedBy, pointCountMinute, clusterSize, observerDistance, detectionMethod, uid, eventID, scientificName, startDate)
+
+bird$NEON.Bird_Conservancy_of_the_Rockies.brd_personnel %>% filter(technicianID %in% c("IRC", "EFN")) %>% ggplot(aes(date, evaluationScore, col=technicianID)) + geom_point() + facet_wrap(~evaluationMethod)
+
+  count(identifiedBy)
+
+bird$brd_countdata%>% count(detectionMethod, visualConfirmation)
+
+bird$brd_perpoint %>% count(eventID, sort=TRUE)
+#%>% join_left(bird$brd_perpoint)
+```
+
+Why are there multiple pointCountMinute observations at a given 
+
+
+
+```{r}
+bird$brd_perpoint  
+  
+  ggplot(aes(startDate, pointCountMinute)) + geom_point() + facet_wrap(~plotID)
 
 brd_site %>% group_by(siteID, scientificName) %>% mutate(n = RcppRoll::roll_mean(siteCountMinute, n = 10, fill = 0))
 
