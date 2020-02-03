@@ -25,5 +25,59 @@ saveRDS(bird, "cache/bird.rds")
 saveRDS(mozzie, "cache/mozzie.rds")
 ```
 
+```{r}
+bird <- readRDS("cache/bird.rds")
+beetle <- readRDS("cache/beetle.rds")
+mozzie <- readRDS("cache/mozzie.rds")
+```
+
+```{r}
+# names(bird)
+brd_df <- bird$brd_countdata
+brd_df %>% names()
+brd_df %>% count(taxonRank, sort=TRUE)
+brd_df %>% count(siteID, sort=TRUE) # 74 sites
+brd_df %>% count(plotID, sort=TRUE) # 634 plots
+```
+
+```{r}
+brd_site <- brd_df %>% 
+  filter(taxonRank == "species") %>%
+  select(scientificName, siteID, plotID, pointCountMinute, startDate) %>%
+  group_by(siteID, scientificName, startDate) %>% ## sum pointCounts over plotID
+  summarize(siteCountMinute = sum(pointCountMinute))
+
+brd <- brd_site %>% 
+  select(scientificName, siteID, siteCountMinute, startDate) %>%
+  group_by(scientificName, startDate) %>% ## sum pointCounts over plotID
+  summarize(totalCountMinute = sum(siteCountMinute))
+```
+
+
+```{r}
+common <- brd %>% count(scientificName, sort=TRUE) %>% head(5)
+```
+
+
+````{r}
+brd_site %>% 
+  inner_join(common) %>% 
+  ggplot(aes(startDate, siteCountMinute, col=siteID)) + geom_point() + facet_wrap(~scientificName)
+
+brd_site %>% 
+  filter(scientificName == "Zenaida macroura", siteID == "CPER") %>% 
+  ggplot(aes(startDate, siteCountMinute)) + geom_point() + facet_wrap(~siteID)
+
+brd_site %>% group_by(siteID, scientificName) %>% mutate(n = RcppRoll::roll_mean(siteCountMinute, n = 10, fill = 0))
+
+```
+
+
+```{r}
+# A <- inner_join(brd, common)
+A %>% ggplot(aes(startDate, totalCountMinute)) + geom_point() + facet_wrap(~scientificName)
+```
+
+
 
 
