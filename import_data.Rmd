@@ -1,0 +1,84 @@
+---
+output: github_document
+
+---
+
+
+
+
+```{r setup}
+# remotes::install_github("cboettig/contenturi")
+library(contenturi)
+library(pins)
+library(tidyverse)
+library(neonUtilities)
+library(bench)
+```
+
+[Bird counts](https://data.neonscience.org/data-products/DP1.10003.001)
+[Bettle traps](https://data.neonscience.org/data-products/DP1.10022.001)
+[Mosquito traps](https://data.neonscience.org/data-products/DP1.10043.001)
+
+```{r}
+bench::mark(
+  bird <- loadByProduct(dpID="DP1.10003.001", site="all", package="expanded", check.size = FALSE)
+)
+```
+
+```{r}
+bench::mark(
+  beetle <- loadByProduct(dpID="DP1.10022.001", site="all", package="expanded", check.size = FALSE)
+)
+```
+
+```{r}
+bench::mark(
+  mozzie <- loadByProduct(dpID="DP1.10043.001", site="all", package="expanded", check.size = FALSE)
+)
+```
+
+
+```{r}
+lapply(names(bird), function(tbl) invisible(write_tsv(bird[[tbl]], paste0("cache/", tbl, ".tsv.gz")) ))
+
+
+saveRDS(beetle, "cache/beetle.rds")
+saveRDS(bird, "cache/bird.rds")
+saveRDS(mozzie, "cache/mozzie.rds")
+```
+
+```{r}
+content_uri("cache/beetle.rds")
+content_uri("cache/mozzie.rds")
+content_uri("cache/bird.rds")
+
+```
+
+```{r}
+## This is a bit hacky, assumes `repo` (currently at ".") is public GitHub repository where
+## we are committing these files, but means we can register at least some temporary URLs for 
+## this content
+
+library(gert)
+path <- c("cache/bird.rds", "cache/beetle.rds", "cache/mozzie.rds")
+
+mint_github_url <- function(path, msg = "data cache", push = TRUE, repo = "."){
+  
+  gert::git_add(path, repo = repo)
+  sha <- gert::git_commit(msg)
+  
+  remotes <- git_remote_list()
+  url <- remotes[[remotes$name=="origin", "url"]]
+  url <- gsub("\\.git$", "", url)
+  #info <- git_info(repo = repo)
+  #branch_remote <- gsub(paste0(info$remote, "/"), "", info$upstream)
+  gh_urls <- paste(url, "raw", sha, path, sep="/")
+  
+  if(push) gert::git_push()
+  
+  gh_urls
+}
+
+lapply(gh_urls, contenturi::register_url)
+
+```

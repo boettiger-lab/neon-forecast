@@ -1,30 +1,7 @@
 ---
-output: github_document
-
+title: "Expore"
+output: html_document
 ---
-
-
-```{r setup}
-library(tidyverse)
-library(neonUtilities)
-```
-
-[Bird counts](https://data.neonscience.org/data-products/DP1.10003.001)
-[Bettle traps](https://data.neonscience.org/data-products/DP1.10022.001)
-[Mosquito traps](https://data.neonscience.org/data-products/DP1.10043.001)
-
-```{r}
-bird <- loadByProduct(dpID="DP1.10003.001", site="all", package="expanded", check.size = FALSE)
-beetle <- loadByProduct(dpID="DP1.10022.001", site="all", package="expanded", check.size = FALSE)
-mozzie <- loadByProduct(dpID="DP1.10043.001", site="all", package="expanded", check.size = FALSE)
-```
-
-```{r}
-saveRDS(beetle, "cache/beetle.rds")
-saveRDS(bird, "cache/bird.rds")
-saveRDS(mozzie, "cache/mozzie.rds")
-```
-
 ```{r}
 bird <- readRDS("cache/bird.rds")
 beetle <- readRDS("cache/beetle.rds")
@@ -41,12 +18,16 @@ brd_df %>% count(siteID, sort=TRUE) # 74 sites
 brd_df %>% select(plotID, startData) # 634 plots
 ```
 
+
+
+
+
 ```{r}
 brd_site <- brd_df %>% 
   filter(taxonRank == "species") %>%
-  select(scientificName, siteID, plotID, pointCountMinute, startDate) %>%
-  group_by(siteID, scientificName, startDate) %>% ## sum pointCounts over plotID
-  summarize(siteCountMinute = sum(pointCountMinute))
+  select(scientificName, siteID, plotID, eventID, startDate, clusterSize) %>%
+  group_by(eventID, siteID, scientificName, startDate) %>% ## sum pointCounts over plotID
+  summarize(count_per_minute = mean(clusterSize))
 
 brd <- brd_site %>% 
   select(scientificName, siteID, siteCountMinute, startDate) %>%
