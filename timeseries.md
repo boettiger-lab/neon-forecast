@@ -37,6 +37,31 @@ bird <- readRDS("cache/bird.rds")
 brd_df <- bird$brd_countdata
 ```
 
+How do we use this sampling to construct a measure of species abundance
+over time?
+
+Sampling occurs at discrete sites in discrete 6 minute events in which
+one or more observers count every bird they can observe in that
+interval. Observers note the species ID, approximate distance to the
+bird (or cluster), number of birds in a cluster, method of
+identification (visual, singing, etc) and sometimes additional
+information (sex) during each minute-length interval of the 6 minute
+event.
+
+I assume individual observers do not enter the same bird twice under two
+seperate identification methods, or that multiple observers do not both
+enter an observation for the same bird, but this can probably be
+confirmed in the protocol.
+
+A sampling event is defined then by a unique ID which indicates a point
+in space and time. The location is given by a combination of pointID,
+which is unique only within a plot, and the plotID, which includes the
+site. Time is given as a startDate which may be shared across several
+events. Thus for a given species, we can sum clusterSizes for each
+unique event to find the total count of species that was observed at
+that point in a given 6-minute
+interval.
+
 ``` r
   ## sum bird (clusters) counted at each of the six minutes of the sampling event 
   ##(i.e. regardless of observerDistance and detectionMethod, or pointCountMinute)
@@ -49,6 +74,17 @@ brd_event <- brd_df %>%
 ## an eventID is plotID+pointID+startDate
 ## A plotID includes the siteID
 ```
+
+How do we combine this over points, plots, etc for a density? We could
+view the multiple events that occur at a given point as independent
+estimates of the density at that point and average them. We could
+likewise consider the multiple points in a plot as independent estimates
+of the plot and average those, etc.
+
+But we should probably be summing instead of averaging? e.g. count up
+all the occurances in an area and divide by the ‘size’ of the area.
+Though it is not clear that we can say if a given area (e.g. plot) was
+sampled completely – plots could differ greatly in size.
 
 ``` r
 ## We can have many different points in the same plot
