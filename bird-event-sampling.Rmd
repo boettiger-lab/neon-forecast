@@ -1,0 +1,74 @@
+---
+title: "Explore"
+output: github_document
+---
+
+```{r}
+library(lubridate)
+library(tidyverse)
+```
+
+
+```{r}
+bird <- readRDS("cache/bird.rds")
+brd_df <- bird$brd_countdata
+```
+
+
+Let's find a relatively complicated event
+```{r}
+exciting_event <- brd_df %>% count(eventID, sort=TRUE) %>% head(1) %>% pull(eventID) 
+```
+
+
+By definition, these occur at the same location: (siteID, plotID, pointID), and time (startDate).  So let's drop the info that's shared across all (65) entries in this event `eventID ("LAJA_001.21.2018-05-26T07:01-04:00[America/Puerto_Rico]")`
+
+```{r}
+df <- brd_df %>%  
+  filter(eventID == exciting_event) %>% 
+  select(-siteID, -plotID, -pointID, -eventID, -uid,
+         -namedLocation, -domainID, -plotType,
+         -startDate, -publicationDate)
+df
+```
+
+
+Let's focus on just the most commonly seen of the 18 species observed in this event (looks to be `"Tyrannus dominicensis"`).  Again, we'll drop the fields that shared across all entries
+
+```{r}
+common <- df %>% count(scientificName, sort = TRUE) %>% head(1) %>% pull(scientificName)
+kingbird <- df %>% filter(scientificName == common) %>% select(-taxonID, -scientificName, -taxonRank, -vernacularName, -family)
+kingbird
+```
+
+Looks like we have 2 observers (IRC and EFN), with IRC identifying by `singing` and EFN by `visual`. We also get observations by minute of the six-minute interval
+
+```{r}
+ex <- kingbird %>% 
+  select(pointCountMinute, clusterSize, observerDistance, 
+         detectionMethod, identifiedBy, visualConfirmation) %>% 
+  arrange(pointCountMinute)
+
+```
+
+How shall we estimate a species density from this data?  Apparently, research interpets this question through the lens of "detection probability" as if there were a "true", uniform density of birds over the landscape (which we seek to estimate) but he probability that an observer sees a bird is a function only of the distance to the observer and the unknown density.  (Guessing social behavior of flocks is going to be hard to include?)
+
+Of course our sampling probability may differ across species and location-specific variables such as plotType / domainID, as well as some temporal dependence; presumably a generic model will allow us to account for these parametrically to borrow power across these events.  We will revisit these issues after considering what a density estimate looks like when those differences across space/time/species are held fixed. 
+
+To simplify a step further first, let us consider a single detection method / observer as well:
+
+```{r}
+min_ex <- ex %>% 
+  filter(detectionMethod == "singing") %>% 
+  select(pointCountMinute, clusterSize, observerDistance)
+```
+
+
+Let's consider some simple models of detection probability: 
+
+$$P( x | d) = x_0 e^{-\alpha d} $$
+
+
+
+
+
