@@ -64,11 +64,9 @@ min_ex <- ex %>%
 ```
 
 
-Let's consider some simple models of detection probability: 
+Of course we want to leverage prior art in this analysis as well.  One line of analysis is the class of distance based methods, e.g. [Buckland et al](https://doi.org/10.1007/978-3-319-19219-2 "Distance Sampling: Methods and Applications").  This group appears to have a substantial suite of [associated software](https://github.com/DistanceDevelopment/Distance), including the [`Distance` R package](https://cran.r-project.org/web/packages/Distance/) described [in JSS](https://doi.org/10.18637/jss.v089.i01). 
 
-$$P( x | d) = x_0 e^{-\alpha d} $$
+Perhaps these methods could be applied in an appropriate pipeline to create a higher-level data product summarizing abundance efforts, which would be the focus of further analysis and any forecasting predictions.
 
-
-
-
+I am also curious if it is reasonable to forecast the 'observed data' directly without invoking the concept of abundance, and if so, what it would mean.  
 
