@@ -156,8 +156,16 @@ vireo <- ds_data %>% filter(scientificName == topbird)
 ```
 
 
-yeah um no...  `Distance::ds` attempts numerous black magic steps and unsurprisingly the non-linear optimization routine goes off the rails....
+yeah um no...  `Distance::ds` attempts numerous black magic steps and unsurprisingly the non-linear optimization routine can just go off the rails....
 
 ```{r error=FALSE}
 m <- ds(vireo, transect = "point")
+```
+
+```{r}
+m
+```
+
+```{r}
+summary(m)
 ```
