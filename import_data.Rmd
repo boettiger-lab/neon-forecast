@@ -7,7 +7,7 @@ output: github_document
 
 
 ```{r setup}
-# remotes::install_github("cboettig/contenturi")
+# remotes::install_github("cboettig/contenturi@names")
 library(contenturi)
 library(pins)
 library(tidyverse)
@@ -47,12 +47,23 @@ saveRDS(bird, "cache/bird.rds")
 saveRDS(mozzie, "cache/mozzie.rds")
 ```
 
-```{r}
-content_uri("cache/beetle.rds")
-content_uri("cache/mozzie.rds")
-content_uri("cache/bird.rds")
 
+
+
+
+```{r}
+bet_id <- store("cache/beetle.rds")
+moz_id <- store("cache/mozzie.rds")
+brd_id <- store("cache/bird.rds")
 ```
+
+
+
+
+
+
+
+
 
 ```{r}
 ## This is a bit hacky, assumes `repo` (currently at ".") is public GitHub repository where
@@ -79,6 +90,6 @@ mint_github_url <- function(path, msg = "data cache", push = TRUE, repo = "."){
   gh_urls
 }
 
-lapply(gh_urls, contenturi::register_url)
+#lapply(gh_urls, contenturi::register_url)
 
 ```

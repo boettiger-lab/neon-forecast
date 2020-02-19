@@ -1,18 +1,31 @@
 ---
-title: "Explore"
+title: "Exploring NEON Bird abundance data"
 output: github_document
 ---
 
-```{r}
+## Warm-up: exploring the data schema of the NEON sampling routine
+
+```{r setup, message = FALSE}
+
 library(lubridate)
 library(tidyverse)
+
+library(contenturi) # remotes::install_github("cboettig/contenturi@names")
+
 ```
 
+
+We'll use a cached copy of the bird data (see `import_data.Rmd` for import from NEON).
 
 ```{r}
-bird <- readRDS("cache/bird.rds")
+#bird <- readRDS("cache/bird.rds")
+
+## We'll access the data by content identifier for data reproducibility
+f <- contenturi::retrieve("hash://sha256/758f1d665d5a25f48e9fa52f3eda7bc320003187c70a3c12a8bfcd13824be3af")
+bird <- readRDS(f) 
 brd_df <- bird$brd_countdata
 ```
+
 
 
 Let's find a relatively complicated event
@@ -29,7 +42,7 @@ df <- brd_df %>%
   select(-siteID, -plotID, -pointID, -eventID, -uid,
          -namedLocation, -domainID, -plotType,
          -startDate, -publicationDate)
-df
+df %>% head()
 ```
 
 
@@ -49,24 +62,102 @@ ex <- kingbird %>%
          detectionMethod, identifiedBy, visualConfirmation) %>% 
   arrange(pointCountMinute)
 
+head(ex)
+
 ```
 
 How shall we estimate a species density from this data?  Apparently, research interpets this question through the lens of "detection probability" as if there were a "true", uniform density of birds over the landscape (which we seek to estimate) but he probability that an observer sees a bird is a function only of the distance to the observer and the unknown density.  (Guessing social behavior of flocks is going to be hard to include?)
 
 Of course our sampling probability may differ across species and location-specific variables such as plotType / domainID, as well as some temporal dependence; presumably a generic model will allow us to account for these parametrically to borrow power across these events.  We will revisit these issues after considering what a density estimate looks like when those differences across space/time/species are held fixed. 
 
-To simplify a step further first, let us consider a single detection method / observer as well:
 
-```{r}
-min_ex <- ex %>% 
-  filter(detectionMethod == "singing") %>% 
-  select(pointCountMinute, clusterSize, observerDistance)
-```
+----------
+
+# Using the `Distance` package on NEON observations
 
 
 Of course we want to leverage prior art in this analysis as well.  One line of analysis is the class of distance based methods, e.g. [Buckland et al](https://doi.org/10.1007/978-3-319-19219-2 "Distance Sampling: Methods and Applications").  This group appears to have a substantial suite of [associated software](https://github.com/DistanceDevelopment/Distance), including the [`Distance` R package](https://cran.r-project.org/web/packages/Distance/) described [in JSS](https://doi.org/10.18637/jss.v089.i01). 
 
+
+
+<!--
 Perhaps these methods could be applied in an appropriate pipeline to create a higher-level data product summarizing abundance efforts, which would be the focus of further analysis and any forecasting predictions.
 
 I am also curious if it is reasonable to forecast the 'observed data' directly without invoking the concept of abundance, and if so, what it would mean.  
+-->
 
+
+```{r}
+library(Distance)
+
+## Defines a data schema: see `?flatfile`
+# ?flatfile
+```
+
+In the `Distance` schema, columns are: 
+
+`distance`: 	observed distance to object
+`Sample.Label`: 	Identifier for the sample (transect id)
+`Effort`: 	effort for this transect (e.g. line transect length or number of times point transect was visited)
+`Region.Label`: 	label for a given stratum (see below)
+`Area`: 	area of the strata  
+  
+How do these compare to the NEON sample protocol schema?  `distance` is clearly `observerDistance`.  I believe `Region.Label` corresponds to `PlotID`,
+though it could also be considered as `SiteID`?  `Area` is area of the region, though I'll need to go beyond the package documentation to determine where the heck Area figures into the calculation (a separate notion of area already being implicit in the radial observation distance function). 
+It's a bit buried, but the schema assumes `size` is clusterSize.  
+
+`SampleID` is probably `eventID`, or `pointID` -- the schema seems to use `Effort` to count "the number of times a point was revisited", and does not seem to have a notion of the length/duration of the visit, but no doubt assumes those are standardized.  Our points are indeed revisted, 
+
+```{r}
+bird_ds <- brd_df %>% mutate(pointID = paste(plotID, pointID, sep="-")) # easier when pointID is unique
+effort <- bird_ds %>% select(pointID,startDate) %>% distinct() %>% count(pointID)
+
+```
+
+
+Let's take a look at how detection probability might depend on distance:
+
+```{r}
+bird_ds %>% count(scientificName, sort = TRUE) %>% head() %>% na.omit() -> common
+common
+
+bird_ds %>% inner_join(common) %>% ggplot(aes(observerDistance)) + 
+  geom_histogram() + facet_wrap(~scientificName, scales = "free_y")
+```
+
+Those distances at 1km sound suspect, probably a rounding effect.
+
+```{r}
+bird_ds %>% inner_join(common) %>% filter(observerDistance < 900) %>% ggplot(aes(observerDistance)) + 
+  geom_histogram() + facet_wrap(~scientificName, scales = "free_y")
+```
+
+What's `Distance` doing with `Area`?  Looks like this is just used to turn denities into abundances.  For the moment we will take `Area = 1` then and treat our estimates as densities.  (`brd_perpoint` table gives lat-long coordinates of the sample points, we could attempt to draw enclosing polygons around points in a plot, but that seems like a potentially poor estimate of plot area.  More importantly, it is not clear that the count in the plot area is of any intrinsic interest). (Perhaps Region.Label is only used to associate regional areas, it's not clear if the methods are allowing for the density estimate function to actually differ across region.  Of course this is something we can manually do by grouping by plotID or siteID)
+
+
+
+  
+```{r}
+ds_data <- bird_ds %>% 
+  left_join(rename(effort, Effort = n), by = "pointID") %>%
+  select(scientificName, 
+       distance = observerDistance, Sample.Label = eventID, 
+       Region.Label = plotID, size = clusterSize) %>% 
+  mutate(Area = 1) 
+
+
+```
+
+We could `dplyr::group_by(scientificName) %>% dplyr::group_map()`, but for simplicity let us consider a species at a time.  
+
+```{r}
+topbird <- common %>% pull(scientificName) %>% head(1) 
+vireo <- ds_data %>% filter(scientificName == topbird)
+```
+
+
+yeah um no...  `Distance::ds` attempts numerous black magic steps and unsurprisingly the non-linear optimization routine goes off the rails....
+
+```{r error=FALSE}
+m <- ds(vireo, transect = "point")
+```

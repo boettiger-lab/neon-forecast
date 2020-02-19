@@ -1,0 +1,46 @@
+---
+title: "Beetles"
+output: github_document
+---
+
+```{r}
+library(lubridate)
+library(tidyverse)
+```
+
+
+```{r}
+beetles <- readRDS("cache/beetle.rds")
+names(beetles)
+```
+```{r}
+#beetles$variables_10022 %>% View()
+
+beetles$bet_sorting %>% count(siteID, plotID, collectDate, scientificName, sort = TRUE)
+```
+
+```{r}
+# plotID includes siteID 
+#beetles$bet_sorting %>% count(taxonRank, sort = TRUE)
+## consider fitlering to taxonRank
+beetle_plot_counts <- beetles$bet_sorting %>% 
+  filter(taxonRank == "species") %>% 
+  group_by(plotID, collectDate, scientificName)  %>% 
+  summarise(plotAve = mean(individualCount)) %>% ungroup()
+
+beetle_site_counts <- beetles$bet_sorting %>% 
+  group_by(siteID, collectDate, scientificName)  %>% 
+  summarise(siteCount = sum(individualCount)) %>% ungroup()
+
+beetle_site_counts %>%  group_by(scientificName)  %>% summarise(totals= sum(siteCount)) %>% arrange(desc(totals)) %>% head(9) -> common
+beetle_site_counts %>% count(siteID, sort = TRUE) %>% head(6) -> main_sites
+```
+
+
+And once again the patterns would seem to be entirely dominated entirely by sampling effort
+
+```{r}
+beetle_site_counts %>% inner_join(main_sites) %>% inner_join(common) %>%
+  ggplot(aes(collectDate, siteCount, col = siteID)) + geom_point() + facet_wrap(~scientificName, scales = "free_y")
+
+```
