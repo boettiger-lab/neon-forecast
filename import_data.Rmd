@@ -39,12 +39,15 @@ bench::mark(
 
 
 ```{r}
-lapply(names(bird), function(tbl) invisible(write_tsv(bird[[tbl]], paste0("cache/", tbl, ".tsv.gz")) ))
+# bird = 10003, beetle = 10022, moz = 10043
+lapply(list(bird, beetle, mozzie), 
+       function(dataset) 
+         lapply(names(dataset), 
+                function(tbl) 
+                  write_tsv(dataset[[tbl]], paste0("cache/",  tbl, ".tsv.gz"))
+                )
+)
 
-
-saveRDS(beetle, "cache/beetle.rds")
-saveRDS(bird, "cache/bird.rds")
-saveRDS(mozzie, "cache/mozzie.rds")
 ```
 
 ```{r}

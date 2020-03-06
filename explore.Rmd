@@ -9,6 +9,17 @@ mozzie <- readRDS("cache/mozzie.rds")
 ```
 
 ```{r}
+names(beetle)
+```
+
+```{r}
+names(mozzie)
+```
+
+
+
+
+```{r}
 #bird$variables_10003 %>% View()
 
 brd_df <- bird$brd_countdata
