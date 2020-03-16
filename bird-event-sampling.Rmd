@@ -11,6 +11,8 @@ library(lubridate)
 library(tidyverse)
 
 library(contenturi) # remotes::install_github("cboettig/contenturi@names")
+library(neonstore)
+
 
 ```
 
@@ -18,13 +20,31 @@ library(contenturi) # remotes::install_github("cboettig/contenturi@names")
 We'll use a cached copy of the bird data (see `import_data.Rmd` for import from NEON).
 
 ```{r}
-#bird <- readRDS("cache/bird.rds")
 
-## We'll access the data by content identifier for data reproducibility
-f <- contenturi::retrieve("hash://sha256/758f1d665d5a25f48e9fa52f3eda7bc320003187c70a3c12a8bfcd13824be3af")
-bird <- readRDS(f) 
-brd_df <- bird$brd_countdata
+stacked_products <- function(dpID){
+  neonstore::neon_registry() %>% 
+      readr::read_csv() %>%
+      dplyr::filter(product == paste0("stacked-", dpID)) %>% 
+      dplyr::select(id, name) %>% 
+      dplyr::distinct()
+}
+  
+df <- stacked_products("DP1.10003.001")
+
+
 ```
+
+```{r}
+## We'll access the data by content identifier for data reproducibility
+#f <- contenturi::resolve("hash://sha256/758f1d665d5a25f48e9fa52f3eda7bc320003187c70a3c12a8bfcd13824be3af")
+ brd_countdata <- contenturi::retrieve(
+    "hash://sha256/3544e9345cc9ff9e235ff49e2d446dfea1ce5fb2be2c82c66f4e58516bf8a3bd")
+
+#bird <- readRDS(f) 
+brd_df <- read_csv(brd_countdata)
+```
+
+
 
 
 
@@ -118,18 +138,20 @@ effort <- bird_ds %>% select(pointID,startDate) %>% distinct() %>% count(pointID
 Let's take a look at how detection probability might depend on distance:
 
 ```{r}
-bird_ds %>% count(scientificName, sort = TRUE) %>% head() %>% na.omit() -> common
+bird_ds %>% count(family, sort = TRUE) %>% head() %>% na.omit() -> common
 common
 
 bird_ds %>% inner_join(common) %>% ggplot(aes(observerDistance)) + 
-  geom_histogram() + facet_wrap(~scientificName, scales = "free_y")
+  geom_histogram() + facet_wrap(~family, scales = "free_y")
 ```
 
 Those distances at 1km sound suspect, probably a rounding effect.
 
 ```{r}
-bird_ds %>% inner_join(common) %>% filter(observerDistance < 900) %>% ggplot(aes(observerDistance)) + 
-  geom_histogram() + facet_wrap(~scientificName, scales = "free_y")
+bird_ds %>% inner_join(common) %>% 
+  filter(observerDistance < 900) %>% 
+  ggplot(aes(observerDistance)) + 
+  geom_histogram() + facet_wrap(~family, scales = "free_y")
 ```
 
 What's `Distance` doing with `Area`?  Looks like this is just used to turn denities into abundances.  For the moment we will take `Area = 1` then and treat our estimates as densities.  (`brd_perpoint` table gives lat-long coordinates of the sample points, we could attempt to draw enclosing polygons around points in a plot, but that seems like a potentially poor estimate of plot area.  More importantly, it is not clear that the count in the plot area is of any intrinsic interest). (Perhaps Region.Label is only used to associate regional areas, it's not clear if the methods are allowing for the density estimate function to actually differ across region.  Of course this is something we can manually do by grouping by plotID or siteID)
@@ -140,7 +162,7 @@ What's `Distance` doing with `Area`?  Looks like this is just used to turn denit
 ```{r}
 ds_data <- bird_ds %>% 
   left_join(rename(effort, Effort = n), by = "pointID") %>%
-  select(scientificName, 
+  select(family, 
        distance = observerDistance, Sample.Label = eventID, 
        Region.Label = plotID, size = clusterSize) %>% 
   mutate(Area = 1) 
@@ -148,24 +170,69 @@ ds_data <- bird_ds %>%
 
 ```
 
-We could `dplyr::group_by(scientificName) %>% dplyr::group_map()`, but for simplicity let us consider a species at a time.  
+
+
 
 ```{r}
-topbird <- common %>% pull(scientificName) %>% head(1) 
-vireo <- ds_data %>% filter(scientificName == topbird)
+topbird <- common %>% pull(family) 
 ```
 
 
-yeah um no...  `Distance::ds` attempts numerous black magic steps and unsurprisingly the non-linear optimization routine can just go off the rails....
+A single example: 
+
+```{r}
+ex <- ds_data %>% filter(family %in% topbird[[1]]) %>% as.data.frame(stringsAsFactors = TRUE)
+m <- ds(ex, transect = "point")
+
+```
+
+Some helper extraction methods (becuase it's great when all the summary statistics are buried in print methods)
+
+```{r}
+ estimate_table <- function(abund) {
+  abund_summary <- summary(abund)
+  x <- abund_summary$ds
+  if(!is.null(x$Nhat)){
+    parameters=data.frame(Estimate=c(x$average.p,x$Nhat))
+    row.names(parameters)=c("Average p", "N in covered region")
+    if(!is.null(x$average.p.se)){
+      parameters$SE=c(x$average.p.se,x$Nhat.se)
+      parameters$CV=parameters$SE/parameters$Estimate
+    }
+  }else{
+    parameters=data.frame(Estimate=c(x$average.p))
+    row.names(parameters)=c("Average p")
+    if(!is.null(x$average.p.se)){
+      parameters$SE=c(x$average.p.se)
+      parameters$CV=parameters$SE/parameters$Estimate
+    }
+  }
+parameters
+}
+```
+
+And now we can estimate density and abundance:
+
+```{r}
+estimate_table(m)
+```
+
 
 ```{r error=FALSE}
-m <- ds(vireo, transect = "point")
+ex <- ds_data %>% filter(family %in% topbird) %>% as.data.frame(stringsAsFactors = TRUE)
+
+abund <- ex %>% group_by(family) %>% 
+  dplyr::group_modify( function(df, ...){
+    m <- ds(as.data.frame(df), transect = "point")
+    out <- estimate_table(m)
+    out <- tibble::rownames_to_column(out)
+    out
+  }, keep = TRUE)
+
 ```
 
 ```{r}
-m
+abund_df <- dplyr::bind_rows(abund)
+abund_df
 ```
 
-```{r}
-summary(m)
-```
