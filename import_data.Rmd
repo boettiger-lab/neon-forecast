@@ -7,11 +7,12 @@ output: github_document
 
 
 ```{r setup}
-# remotes::install_github("cboettig/contenturi@names")
+# remotes::install_github("cboettig/contenturi")
+# remotes::install_github("cboettig/neonstore")
+
 library(contenturi)
-library(pins)
+library(neonstore)
 library(tidyverse)
-library(neonUtilities)
 library(bench)
 ```
 
@@ -19,80 +20,82 @@ library(bench)
 [Bettle traps](https://data.neonscience.org/data-products/DP1.10022.001)
 [Mosquito traps](https://data.neonscience.org/data-products/DP1.10043.001)
 
-```{r}
-bench::mark(
-  bird <- loadByProduct(dpID="DP1.10003.001", site="all", package="expanded", check.size = FALSE)
-)
-```
-
-```{r}
-bench::mark(
-  beetle <- loadByProduct(dpID="DP1.10022.001", site="all", package="expanded", check.size = FALSE)
-)
-```
-
-```{r}
-bench::mark(
-  mozzie <- loadByProduct(dpID="DP1.10043.001", site="all", package="expanded", check.size = FALSE)
-)
-```
 
 
-```{r}
-# bird = 10003, beetle = 10022, moz = 10043
-lapply(list(bird, beetle, mozzie), 
-       function(dataset) 
-         lapply(names(dataset), 
-                function(tbl) 
-                  write_tsv(dataset[[tbl]], paste0("cache/",  tbl, ".tsv.gz"))
-                )
-)
+Create a content-based NEON store.  This function will repeatedly download NEON data as requested, but will only (locally) store files if they change.  Data available in the local
+store is indicated by filename.  
 
+
+```{r birds}
+bench_time({
+neon_store("DP1.10003.001")
+neon_stack("DP1.10003.001")
+})
 ```
 
 
 
-
+```{r  beetles}
+bench_time({
+neon_store("DP1.10022.001")
+neon_stack("DP1.10022.001")
+})
+```
 
 ```{r}
-bet_id <- store("cache/beetle.rds")
-moz_id <- store("cache/mozzie.rds")
-brd_id <- store("cache/bird.rds")
+bench_time({
+neon_store("DP1.10043.001")
+neon_stack("DP1.10043.001")
+})
+```
+
+```{r}
+```
+
+```{r}
+reg <- neon_registry() %>% readr::read_csv()
+paths <- as.character( lapply(reg$id, contenturi::retrieve) )
+exists<- fs::file_exists(paths)
+sum(exists)
+sum(!exists)
+
+infos <- fs::file_info(paths) 
+infos %>% arrange(desc(size))
+```
+
+```{r eval = FALSE}
+
+# Wow crash and burn trying this with pins!
+#library(pins)
+
+# set to 0 to upload as asset instead of commit (fails either way)
+# options(pins.github.release = 0)
+#
+# board_register_github(repo = "cboettig/neon-cache")
+# pin(paths, board = "github")
+```
+
+````{r}
+piggyback::pb_upload(paths, 
+                     include_path = FALSE, 
+                     repo = "boettiger-lab/content-store",
+                     tag = "data")
+
+
+df <- piggyback::pb_list(repo = "boettiger-lab/content-store",  tag = "data")
+```
+And register these links 
+
+```{r}
+urls <- paste0("https://github.com/boettiger-lab/content-store/releases/download/data/",
+      basename(paths))
+
+contenturi::register(urls)
 ```
 
 
-
-
-
-
-
-
-
-```{r}
-## This is a bit hacky, assumes `repo` (currently at ".") is public GitHub repository where
-## we are committing these files, but means we can register at least some temporary URLs for 
-## this content
-
-library(gert)
-path <- c("cache/bird.rds", "cache/beetle.rds", "cache/mozzie.rds")
-
-mint_github_url <- function(path, msg = "data cache", push = TRUE, repo = "."){
-  
-  gert::git_add(path, repo = repo)
-  sha <- gert::git_commit(msg)
-  
-  remotes <- git_remote_list()
-  url <- remotes[[remotes$name=="origin", "url"]]
-  url <- gsub("\\.git$", "", url)
-  #info <- git_info(repo = repo)
-  #branch_remote <- gsub(paste0(info$remote, "/"), "", info$upstream)
-  gh_urls <- paste(url, "raw", sha, path, sep="/")
-  
-  if(push) gert::git_push()
-  
-  gh_urls
-}
-
-#lapply(gh_urls, contenturi::register_url)
-
+```{r}  
+  br_count <- contenturi::retrieve(
+    "hash://sha256/3544e9345cc9ff9e235ff49e2d446dfea1ce5fb2be2c82c66f4e58516bf8a3bd")
 ```
+
