@@ -232,7 +232,6 @@ abund <- ex %>% group_by(family) %>%
 ```
 
 ```{r}
-abund_df <- dplyr::bind_rows(abund)
-abund_df
+abund
 ```
 
