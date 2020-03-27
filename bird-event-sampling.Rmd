@@ -162,10 +162,10 @@ What's `Distance` doing with `Area`?  Looks like this is just used to turn denit
 ```{r}
 ds_data <- bird_ds %>% 
   left_join(rename(effort, Effort = n), by = "pointID") %>%
-  select(family, 
+  select(family, startDate,
        distance = observerDistance, Sample.Label = eventID, 
        Region.Label = plotID, size = clusterSize) %>% 
-  mutate(Area = 1) 
+  mutate(Area = 1, year = lubridate::year(startDate)) 
 
 
 ```
@@ -219,14 +219,21 @@ estimate_table(m)
 
 
 ```{r error=FALSE}
-ex <- ds_data %>% filter(family %in% topbird) %>% as.data.frame(stringsAsFactors = TRUE)
+ex <- ds_data %>% 
+  #filter(family %in% topbird) %>%
+  as.data.frame(stringsAsFactors = TRUE)
 
-abund <- ex %>% group_by(family) %>% 
+blank <- data.frame(rowname = NA, Estimate = NA, SE = NA, CV = NA)
+
+## Group by year and family
+abund <- ex %>% group_by(family, year) %>% 
   dplyr::group_modify( function(df, ...){
+    tryCatch({
     m <- ds(as.data.frame(df), transect = "point")
     out <- estimate_table(m)
     out <- tibble::rownames_to_column(out)
-    out
+    out}, 
+    error = function(e) blank, finally = blank)
   }, keep = TRUE)
 
 ```
