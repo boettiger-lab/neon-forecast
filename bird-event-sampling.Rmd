@@ -217,28 +217,4 @@ And now we can estimate density and abundance:
 estimate_table(m)
 ```
 
-
-```{r error=FALSE}
-ex <- ds_data %>% 
-  #filter(family %in% topbird) %>%
-  as.data.frame(stringsAsFactors = TRUE)
-
-blank <- data.frame(rowname = NA, Estimate = NA, SE = NA, CV = NA)
-
-## Group by year and family
-abund <- ex %>% group_by(family, year) %>% 
-  dplyr::group_modify( function(df, ...){
-    tryCatch({
-    m <- ds(as.data.frame(df), transect = "point")
-    out <- estimate_table(m)
-    out <- tibble::rownames_to_column(out)
-    out}, 
-    error = function(e) blank, finally = blank)
-  }, keep = TRUE)
-
-```
-
-```{r}
-abund
-```
-
+See [bird-abundance.R](bird-abundance.R) for execution of full data. Should now run relatively quickly.
