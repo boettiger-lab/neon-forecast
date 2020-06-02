@@ -1,88 +1,192 @@
+---
+output: 
+  github_document:
+    df_print: tibble
+---
 
+The NEON bird sampling protocol is clearly designed with modern distance-sampling
+based protocols in mind.  
+
+
+
+```{r message=FALSE}
 library(lubridate)
 library(tidyverse)
 library(Distance)
 
+## remotes::install_github("cboettig/neonstore")
+```
 
-brd_countdata <- neonstore::neon_read("brd_countdata")
-brd_df <- read_csv(brd_countdata) %>% 
-  mutate(pointID = paste(plotID, pointID, sep="-"))
+```{r}
+## ick, manually force columns bc vroom is confused about NEON's
+## non-standard timestamp notation 
+s <- cols(
+  uid = col_character(),
+  namedLocation = col_character(),
+  domainID = col_character(),
+  siteID = col_character(),
+  plotID = col_character(),
+  plotType = col_character(),
+  pointID = col_character(),
+  startDate = col_character(),
+  eventID = col_character(),
+  pointCountMinute = col_double(),
+  targetTaxaPresent = col_character(),
+  taxonID = col_character(),
+  scientificName = col_character(),
+  taxonRank = col_character(),
+  vernacularName = col_character(),
+  family = col_character(),
+  nativeStatusCode = col_character(),
+  observerDistance = col_double(),
+  detectionMethod = col_character(),
+  visualConfirmation = col_character(),
+  sexOrAge = col_character(),
+  clusterSize = col_double(),
+  clusterCode = col_character(),
+  identifiedBy = col_character()
+)
 
-bird_ds <- brd_df %>% mutate(pointID = paste(plotID, pointID, sep="-")) # easier when pointID is unique
-effort <- bird_ds %>% select(pointID,startDate) %>% distinct() %>% count(pointID)
+brd_countdata <- neonstore::neon_read("brd_countdata", col_types = s)
+```
 
+
+
+Let's re-arrange the data slightly so that is more suitable for input in the widely used `Distance` package.  
+
+
+First, let's make all `pointID`s identify unique points in space
+by including the ID of the plot (which includes the siteID already) 
+in the `pointID`  
+
+If we want annual estimates of the abundance of each species, maybe
+we should round the `startDate` to year, allowing us to treat the all visits to the same point in the same year as the effort that year.
+
+Lastly, we'll ignore the issue of Area for the moment and consider density estimates alone, which should be reasonable for forecasting (after all the Area, whatever it is, will remain fixed.)
+
+```{r}
+bird_ds <- brd_countdata %>% 
+  mutate(pointID = paste(plotID, pointID, sep="-")) %>%
+  mutate(year = lubridate::year(startDate), Area = 1)
+```
+
+
+Not really sure on this, but I'm going to set sampling effort as 
+the number of visits to a given point?
+
+```{r}
+effort <- bird_ds %>% 
+  select(pointID,year) %>% 
+  distinct() %>% 
+  count(pointID)
+```
+
+Join the effort data back on by pointID
+
+```{r}
 ds_data <- bird_ds %>%
-  left_join(rename(effort, Effort = n), by = "pointID") %>%
-  select(family, startDate,
-         distance = observerDistance, Sample.Label = eventID, 
-         Region.Label = plotID, size = clusterSize) %>% 
-  mutate(Area = 1, year = lubridate::year(startDate)) 
+  left_join(rename(effort, Effort = n), by = "pointID")
+```
 
+Now rename columns to match `ds` columns, or reflect grouping variables (species, year).
+
+```{r}
+ds_data <- 
+  ds_data  %>% 
+  select(scientificName, 
+         year,
+         distance = observerDistance, 
+         Sample.Label = eventID, 
+         Region.Label = plotID, 
+         size = clusterSize)
+```
+
+
+ 
+## Selecting focal species
+
+```{r}
+brd_countdata %>% select(siteID, scientificName) %>%
+  distinct() %>% count(scientificName, sort = TRUE) %>% head()
+
+
+brd_countdata %>% select(plotID, scientificName) %>%
+  distinct() %>% count(scientificName, sort = TRUE) %>% head()
+
+```
+
+Cool, morning doves are common across sites and plots, let's try something with those.
+
+```{r}
+doves <- ds_data %>% 
+  filter(scientificName == "Zenaida macroura", year == "2015") %>% 
+  as.data.frame()
+```
+
+
+
+
+```{r}
+abund <- Distance::ds(doves, transect = "point")
+```
+
+
+
+
+
+
+
+
+
+
+Let's hack the `Distance::ds` print method to provide a `data.frame` return object instead...
+
+
+```{r}
 
 ## Tidy the `ds` return object
  estimate_table <- function(abund) {
   abund_summary <- summary(abund)
   x <- abund_summary$ds
   if(!is.null(x$Nhat)){
-    parameters=data.frame(Estimate=c(x$average.p,x$Nhat))
-    row.names(parameters)=c("Average p", "N in covered region")
+    parameters = data.frame(Estimate = c(x$average.p,x$Nhat))
+    row.names(parameters) = c("Average p", "N in covered region")
     if(!is.null(x$average.p.se)){
-      parameters$SE=c(x$average.p.se,x$Nhat.se)
-      parameters$CV=parameters$SE/parameters$Estimate
+      parameters$SE = c(x$average.p.se,x$Nhat.se)
+      parameters$CV = parameters$SE/parameters$Estimate
     }
-  }else{
-    parameters=data.frame(Estimate=c(x$average.p))
-    row.names(parameters)=c("Average p")
+  } else {
+    parameters = data.frame(Estimate = c(x$average.p))
+    row.names(parameters) = c("Average p")
     if(!is.null(x$average.p.se)){
-      parameters$SE=c(x$average.p.se)
-      parameters$CV=parameters$SE/parameters$Estimate
+      parameters$SE = c(x$average.p.se)
+      parameters$CV = parameters$SE/parameters$Estimate
     }
   }
-parameters
+  out <- tibble::rownames_to_column(parameters)
+out
 }
+```
 
- 
+We can not get a table summary of the results:
 
-all_groups <-  ds_data %>% 
-  as.data.frame(stringsAsFactors = TRUE) %>% 
-  group_by(family, year) 
-## more than 10 observations in a group please
-good_groups <- inner_join(all_groups, 
-                          all_groups %>% count() %>% filter(n > 10))
+```{r}
+estimate_table(abund)
+```
 
-n <- good_groups %>% count() %>% dim() 
-p1 <- dplyr::progress_estimated(n[1])
+Now we can do multiple years at once: 
 
-blank <- data.frame(rowname = NA, Estimate = NA, SE = NA, CV = NA)
+```{r}
 
 estimate_ds <- function(df, ...){
-    p1$tick()$print()
-    tryCatch({
-      suppressMessages({
     m <- ds(as.data.frame(df), transect = "point")
-      })
-    out <- estimate_table(m)
-    out <- tibble::rownames_to_column(out)
-    out}, 
-    error = function(e) blank, finally = blank)
-  }
+    estimate_table(m)
+}
 
+doves <- ds_data %>% 
+  filter(scientificName == "Zenaida macroura") %>% 
+  group_by(year) %>%
+dplyr::group_modify(estimate_ds, keep = TRUE)
 
-## how many groups?
-n[1]
+```
 
-## Test
-
-ex <- ds_data %>% filter(family %in% "Emberizidae") %>% as.data.frame(stringsAsFactors = TRUE)
-m <- ds(ex, transect = "point")
-# estimate_ds(ex) # will use up a tick!
-
-
-## and here we go!
-  
-abund <- good_groups %>% 
-  #filter(family %in% "Emberizidae") %>%  ## testing on a subset  -- involves several failures!
-  dplyr::group_modify(estimate_ds, keep = TRUE)
-
-saveRDS(abund, "abund.rds")
-write_csv(abund, "abund.csv")
