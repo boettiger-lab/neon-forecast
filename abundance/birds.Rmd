@@ -183,10 +183,11 @@ estimate_ds <- function(df, ...){
     estimate_table(m)
 }
 
-doves <- ds_data %>% 
+doves_abund <- ds_data %>% 
   filter(scientificName == "Zenaida macroura") %>% 
   group_by(year) %>%
 dplyr::group_modify(estimate_ds, keep = TRUE)
 
+doves_abund
 ```
 
