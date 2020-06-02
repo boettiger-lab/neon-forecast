@@ -11,36 +11,13 @@ library(Distance)
 ```
 
 ``` r
-## ick, manually force columns bc vroom is confused about NEON's
-## non-standard timestamp notation 
-s <- cols(
-  uid = col_character(),
-  namedLocation = col_character(),
-  domainID = col_character(),
-  siteID = col_character(),
-  plotID = col_character(),
-  plotType = col_character(),
-  pointID = col_character(),
-  startDate = col_character(),
-  eventID = col_character(),
-  pointCountMinute = col_double(),
-  targetTaxaPresent = col_character(),
-  taxonID = col_character(),
-  scientificName = col_character(),
-  taxonRank = col_character(),
-  vernacularName = col_character(),
-  family = col_character(),
-  nativeStatusCode = col_character(),
-  observerDistance = col_double(),
-  detectionMethod = col_character(),
-  visualConfirmation = col_character(),
-  sexOrAge = col_character(),
-  clusterSize = col_double(),
-  clusterCode = col_character(),
-  identifiedBy = col_character()
-)
+## download only needs to happen once, see import_data.Rmd
+# neon_download("DP1.10003.001")
 
-brd_countdata <- neonstore::neon_read("brd_countdata", col_types = s)
+## ick, manually force columns bc vroom is confused about NEON's non-standard timestamp notation 
+## read in as character data and convert distance to numeric manually for simplicity
+brd_countdata <- neonstore::neon_read("brd_countdata-expanded", col_types = vroom::cols(.default = "c")) %>%
+  mutate(observerDistance = as.numeric(observerDistance))
 ```
 
 Let’s re-arrange the data slightly so that is more suitable for input in
@@ -166,7 +143,15 @@ abund <- Distance::ds(doves, transect = "point")
 
     ## Fitting half-normal key function with cosine(2,3,4,5,6) adjustments
 
-    ## AIC= 2633.49
+    ## Error : 
+    ## gosolnp-->Could not find a feasible starting point...exiting
+
+    ## 
+    ## 
+    ## Error in model fitting, returning: half-normal key function with cosine(2,3,4,5) adjustments
+
+    ## 
+    ##   Error: Error in -lt$value : invalid argument to unary operator
 
     ## No survey area information supplied, only estimating detection function.
 
@@ -205,10 +190,10 @@ estimate_table(abund)
 ```
 
     ## # A tibble: 2 x 4
-    ##   rowname              Estimate        SE    CV
-    ##   <chr>                   <dbl>     <dbl> <dbl>
-    ## 1 Average p              0.0373   0.00384 0.103
-    ## 2 N in covered region 5791.     710.      0.123
+    ##   rowname              Estimate        SE     CV
+    ##   <chr>                   <dbl>     <dbl>  <dbl>
+    ## 1 Average p              0.0435   0.00414 0.0953
+    ## 2 N in covered region 4969.     578.      0.116
 
 Now we can do multiple years at once:
 
@@ -263,15 +248,11 @@ dplyr::group_modify(estimate_ds, keep = TRUE)
 
     ## Fitting half-normal key function with cosine(2,3,4,5) adjustments
 
-    ## Error : 
-    ## gosolnp-->Could not find a feasible starting point...exiting
+    ## AIC= 2638.286
 
-    ## 
-    ## 
-    ## Error in model fitting, returning: half-normal key function with cosine(2,3,4) adjustments
+    ## Fitting half-normal key function with cosine(2,3,4,5,6) adjustments
 
-    ## 
-    ##   Error: Error in -lt$value : invalid argument to unary operator
+    ## AIC= 2633.49
 
     ## No survey area information supplied, only estimating detection function.
 
@@ -343,14 +324,10 @@ dplyr::group_modify(estimate_ds, keep = TRUE)
 
     ## Fitting half-normal key function with cosine(2,3,4) adjustments
 
-    ## AIC= 13110.588
-
-    ## Fitting half-normal key function with cosine(2,3,4,5) adjustments
-
-    ## AIC= 13484.609
+    ## AIC= 13371.874
 
     ## 
-    ## Half-normal key function with cosine(2,3,4) adjustments selected.
+    ## Half-normal key function with cosine(2,3) adjustments selected.
 
     ## No survey area information supplied, only estimating detection function.
 
@@ -392,13 +369,13 @@ doves_abund
     ##    <dbl> <chr>                    <dbl>       <dbl>  <dbl>
     ##  1  2013 Average p               0.111     0.0100   0.0897
     ##  2  2013 N in covered region   718.       99.4      0.138 
-    ##  3  2015 Average p               0.0494    0.00425  0.0860
-    ##  4  2015 N in covered region  4371.      475.       0.109 
+    ##  3  2015 Average p               0.0373    0.00384  0.103 
+    ##  4  2015 N in covered region  5791.      710.       0.123 
     ##  5  2016 Average p               0.0544    0.00411  0.0755
     ##  6  2016 N in covered region  6336.      582.       0.0919
     ##  7  2017 Average p               0.0513    0.00120  0.0234
     ##  8  2017 N in covered region 22142.      824.       0.0372
-    ##  9  2018 Average p               0.0211    0.000396 0.0188
-    ## 10  2018 N in covered region 52997.     1855.       0.0350
+    ##  9  2018 Average p               0.0271    0.000541 0.0200
+    ## 10  2018 N in covered region 41367.     1473.       0.0356
     ## 11  2019 Average p               0.0502    0.00234  0.0466
-    ## 12  2019 N in covered region 20623.     1146.       0.0556
+    ## 12  2019 N in covered region 20624.     1146.       0.0556

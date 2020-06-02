@@ -18,36 +18,13 @@ library(Distance)
 ```
 
 ```{r}
-## ick, manually force columns bc vroom is confused about NEON's
-## non-standard timestamp notation 
-s <- cols(
-  uid = col_character(),
-  namedLocation = col_character(),
-  domainID = col_character(),
-  siteID = col_character(),
-  plotID = col_character(),
-  plotType = col_character(),
-  pointID = col_character(),
-  startDate = col_character(),
-  eventID = col_character(),
-  pointCountMinute = col_double(),
-  targetTaxaPresent = col_character(),
-  taxonID = col_character(),
-  scientificName = col_character(),
-  taxonRank = col_character(),
-  vernacularName = col_character(),
-  family = col_character(),
-  nativeStatusCode = col_character(),
-  observerDistance = col_double(),
-  detectionMethod = col_character(),
-  visualConfirmation = col_character(),
-  sexOrAge = col_character(),
-  clusterSize = col_double(),
-  clusterCode = col_character(),
-  identifiedBy = col_character()
-)
+## download only needs to happen once, see import_data.Rmd
+# neon_download("DP1.10003.001")
 
-brd_countdata <- neonstore::neon_read("brd_countdata", col_types = s)
+## ick, manually force columns bc vroom is confused about NEON's non-standard timestamp notation 
+## read in as character data and convert distance to numeric manually for simplicity
+brd_countdata <- neonstore::neon_read("brd_countdata-expanded", col_types = vroom::cols(.default = "c")) %>%
+  mutate(observerDistance = as.numeric(observerDistance))
 ```
 
 
