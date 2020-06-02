@@ -1,21 +1,22 @@
 ---
 title: "Beetles"
-output: github_document
+output: 
+  github_document:
+    df_print: tibble
 ---
 
-```{r}
+```{r setup,message=FALSE}
 library(lubridate)
 library(tidyverse)
 ```
 
 
 ```{r}
-beetles <- readRDS("cache/beetle.rds")
-names(beetles)
+# neonstore::neon_download("DP1.10022.001")
+bet_sorting <- neonstore::neon_read("bet_sorting")
 ```
-```{r}
-#beetles$variables_10022 %>% View()
 
+```{r}
 beetles$bet_sorting %>% count(siteID, plotID, collectDate, scientificName, sort = TRUE)
 ```
 

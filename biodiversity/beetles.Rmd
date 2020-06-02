@@ -1,0 +1,29 @@
+---
+title: "Beetle Community Metrics"
+output: 
+  github_document:
+    df_print: tibble
+---
+
+```{r setup, message = FALSE}
+library(tidyverse)
+library(neonstore)
+library(lubridate)
+```
+
+
+```{r}
+# neonstore::neon_download("DP1.10022.001")
+bet_sorting <- neonstore::neon_read("bet_sorting")
+```
+
+
+```{r}
+richness <- bet_sorting %>%
+  mutate(year = lubridate::year(collectDate)) %>%
+  select(scientificName, year, siteID) %>% 
+  distinct() %>%
+  count(siteID, year)
+richness
+```
+
