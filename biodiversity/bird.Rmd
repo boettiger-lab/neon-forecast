@@ -1,5 +1,5 @@
 ---
-title: "Beetle Community Metrics"
+title: "Bird Community Metrics"
 output: 
   github_document:
     df_print: tibble
@@ -13,26 +13,23 @@ library(lubridate)
 
 
 ```{r  message = FALSE}
-# neonstore::neon_download("DP1.10022.001")
-bet_sorting <- neonstore::neon_read("bet_sorting")
+brd_countdata <- neonstore::neon_read("brd_countdata-expanded", col_types = vroom::cols(.default = "c"))
 ```
 
 
 ```{r}
-richness <- bet_sorting %>%
-  mutate(year = lubridate::year(collectDate)) %>%
+richness <- brd_countdata %>%
+  mutate(year = lubridate::year(startDate)) %>%
   select(scientificName, year, siteID) %>% 
   distinct() %>%
   count(siteID, year)
 richness
 ```
 
-
-## Let's forecast richness at each site in the following year!
+## Let's make a forecast:
 
 ```{r}
 forecast <- richness %>% group_by(siteID) %>% summarize(forecast = mean(n), sd = sd(n))
-readr::write_csv(forecast, "beetle_richness.csv")
+readr::write_csv(forecast, "bird_richness.csv")
+
 ```
-
-

@@ -12,7 +12,7 @@ library(lubridate)
 ```
 
 
-```{r}
+```{r message = FALSE}
 # neonstore::neon_download("DP1.20120.001")
 inv <- neonstore::neon_read("inv_taxonomyRaw-expanded")
 ```
@@ -27,10 +27,12 @@ richness <- inv %>%
 richness
 ```
 
+
+## Let's forecast richness at each site in the following year!
+
 ```{r}
-inv %>%
-  mutate(year = lubridate::year(collectDate)) %>%
-  select(scientificName, year, siteID) %>%
-  filter(siteID == "ARIK", year == 2014) %>%
-  distinct() 
+forecast <- richness %>% group_by(siteID) %>% summarize(forecast = mean(n), sd = sd(n))
+readr::write_csv(forecast, "macroinvert_richness.csv")
 ```
+
+
