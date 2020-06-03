@@ -71,6 +71,74 @@ bet_domain %>% ggplot(aes(month, count)) + geom_line() + geom_point() +
 
 
 
+-------------------------------------
 
 
+```{r}
+## now the fun starts
+library(nimbleEcology)
+```
+
+## Estimating abundance
+
+> Ground beetles are sampled using pitfall traps (16 oz deli containers filled with 150 or 250 mL of propylene glycol). Four traps are deployed in each of 10 plots at each terrestrial NEON site (40 traps per site), with traps arrayed approximately 20 meters from the center of the plot in each of the four cardinal directions. Sampling occurs biweekly throughout the growing season (when temperatures are above 4 degrees C).
+
+
+Sum all beetles in the trap
+
+```{r}
+trap_totals <- bet_sorting %>% 
+  select(collectDate, siteID, plotID, trapID, scientificName, individualCount) %>%
+  group_by(collectDate, trapID, plotID, siteID) %>%
+  summarize(count = sum(individualCount, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+Actually, let's start with 1 site, and sum the 4 traps in each plot, leaving us with just the 10 plots per collectionDate
+
+```{r}
+ornl <- bet_sorting %>% 
+  filter(siteID == "ORNL") %>%
+  group_by(plotID, collectDate) %>%
+  summarize(count = sum(individualCount, na.rm = TRUE)) %>%
+  ungroup() %>% arrange(collectDate)
+```
+
+Okay, here's 10 plots for the first date:
+
+```{r}
+d1 <- ornl %>% filter(collectDate == as.Date("2014-06-03"))
+d1
+```
+
+```{r}
+len <- length(d1$count)
+dat <- d1$count
+lambda <- mean(d1$count) * 100
+prob <- rep(.01, len)
+```
+
+```{r}
+# Define code for a nimbleModel
+ nc <- nimbleCode({
+   x[1:5] ~ dNmixture_v(lambda, prob = prob[1:5],
+                        Nmin = -1, Nmax = -1, len = 5)
+
+   lambda ~ dunif(0, 1000)
+
+   for (i in 1:5) {
+     prob[i] ~ dunif(0, 1)
+   }
+ })
+
+# Build the model
+nmix <- nimbleModel(nc,
+                    data = list(x = dat),
+                    inits = list(lambda = lambda,
+                                 prob = prob))
+# Calculate log probability of data from the model
+nmix$calculate()
+```
+
+and now time for some max likelihood or MCMC estimation...
 
