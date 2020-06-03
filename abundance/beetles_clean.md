@@ -1,0 +1,105 @@
+Beetles Clean Data
+================
+Kari Norman
+6/3/2020
+
+``` r
+library(lubridate)
+library(tidyverse)
+```
+
+``` r
+# neonstore::neon_download("DP1.10022.001")
+#bet_sorting <- neonstore::neon_read("bet_sorting")
+sites <- neonstore:::neon_sites() 
+```
+
+``` r
+load(here::here("data", "beetles_raw.rda"))
+bet_sorting <- beetles_raw$bet_sorting
+
+bet_ts <- bet_sorting %>% 
+  select(collectDate, siteID, domainID, scientificName, individualCount) %>%
+  mutate(month = format(as.Date(collectDate), "%Y-%m")) %>% 
+  mutate(month = as.Date(paste(month, "01", sep="-"))) %>%
+  group_by(scientificName, month, siteID, domainID) %>%
+  summarize(count = sum(individualCount, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+    ## `summarise()` regrouping output by 'scientificName', 'month', 'siteID' (override with `.groups` argument)
+
+``` r
+load(here::here("data","beetles_counts.rda"))
+
+beetles_counts <- beetles_counts %>%
+    mutate(month = format(as.Date(collectDate), "%Y-%m")) %>% 
+  mutate(month = as.Date(paste(month, "01", sep="-")))
+
+site_trap_days <- beetles_counts %>%
+  select(siteID, month, collectDate, plotID, trapID, trappingDays) %>%
+  distinct() %>%
+  group_by(siteID, month) %>%
+  summarise(siteTrapDays = sum(trappingDays, na.rm = TRUE))
+```
+
+    ## `summarise()` regrouping output by 'siteID' (override with `.groups` argument)
+
+``` r
+bet_ts <- beetles_counts %>%
+  select(collectDate, siteID, domainID, scientificName, count, month) %>%
+  #select(-collectDate) %>%
+  group_by(scientificName, month, siteID, domainID) %>%
+  summarise(siteCount = sum(count, na.rm = TRUE)) %>%
+  left_join(site_trap_days, by = c("siteID", "month")) %>%
+  mutate(cpue = siteCount/siteTrapDays) %>%
+  ungroup()
+```
+
+    ## `summarise()` regrouping output by 'scientificName', 'month', 'siteID' (override with `.groups` argument)
+
+## Counts
+
+First let’s take a quick look at the raw counts data. This is less
+meaningful than abundance, since we would need to account for detection
+probability, and effort is not entirely constant over time or
+necessarily equal across sites. Details of the estimation of beetle
+density will need to take into account the specifics of the pitfall
+sampling design. For now, let’s consider only the raw counts, which are
+much simpler to work with and free from assumptions required to estimate
+abundance:
+
+To start, here is cumulative counts across all beetles: shows an
+increase which is no doubt connected to increased sampling effort as
+sites come online, along with an obvious seasonal pattern…
+
+``` r
+# totals <- bet_ts %>% 
+#   group_by(month) %>%
+#   summarize(count = sum(count, na.rm = TRUE)) %>%
+#   ungroup()
+# 
+# totals %>% ggplot(aes(month, count)) + geom_line() + geom_point()
+```
+
+``` r
+bysite <- bet_ts %>% 
+  group_by(month, siteID, domainID, siteTrapDays) %>%
+  summarize(siteCount = sum(siteCount, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(cpue = siteCount/siteTrapDays)
+```
+
+    ## `summarise()` regrouping output by 'month', 'siteID', 'domainID' (override with `.groups` argument)
+
+``` r
+domains <- sites %>% select(domainCode, domainName) %>% distinct()
+bet_domain <- bysite %>% left_join(domains, by = c(domainID = "domainCode"))
+```
+
+``` r
+bet_domain %>% ggplot(aes(month, cpue)) + geom_line() + geom_point() + 
+  facet_wrap(~domainName, ncol = 3, scale = "free_y")
+```
+
+![](beetles_clean_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
