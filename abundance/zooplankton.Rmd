@@ -1,0 +1,50 @@
+---
+title: "Zooplankton Abundance Estimates"
+output: 
+  github_document:
+    df_print: tibble
+---
+
+```{r setup, message = FALSE}
+library(tidyverse)
+library(neonstore)
+library(lubridate)
+```
+
+
+```{r message = FALSE}
+# neonstore::neon_download("DP1.20219.001")
+zoo <- neonstore::neon_read("zoo_taxonomyRaw-expanded")
+```
+
+```{r}
+zoo_ts <- zoo %>% 
+  select(collectDate, siteID, scientificName, individualCount) %>%
+  mutate(month = format(collectDate, "%Y-%m")) %>% 
+  mutate(month = as.Date(paste(month, "01", sep="-"))) %>%
+  group_by(scientificName, month, siteID) %>%
+  summarize(count = sum(individualCount)) %>%
+  ungroup()
+```
+
+
+Let's just consider the 4 most common species and the 4 sites for that have
+the most individual entries (sample months) for those species
+
+
+```{r}
+top_sp <- zoo_ts %>% count(scientificName, sort=TRUE) %>% pull(scientificName) %>% head(4)
+top_sites <- zoo_ts %>% filter(scientificName %in% top_sp)  %>% count(siteID, sort=TRUE) %>% pull(siteID) %>% head(4)
+```
+
+We really ought to estimate abundance by accounting for detection probability.  
+
+Observing raw counts directly, we see: 
+
+
+```{r}
+zoo_ts %>% filter(scientificName %in% top_sp, siteID %in% top_sites) %>% 
+  ggplot(aes(month, count)) +
+  geom_line() + geom_point() + 
+  facet_grid(scientificName ~ siteID, scales = "free_y")
+```

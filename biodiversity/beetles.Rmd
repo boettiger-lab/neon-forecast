@@ -35,4 +35,55 @@ forecast <- richness %>% group_by(siteID) %>% summarize(forecast = mean(n), sd =
 readr::write_csv(forecast, "beetle_richness.csv")
 ```
 
+Of course, this is only the observed species richness.  We could instead consider forecasting the true species richness, accounting for detection probability.    
+
+
+Let's create a counts matrix of species (cols) x plots (rows)
+
+```{r}
+
+
+abby2017 <- bet_sorting %>%
+  mutate(year = lubridate::year(collectDate)) %>% 
+  filter(siteID == "ABBY", year == "2017") %>%
+  select(plotID, scientificName, individualCount) %>% 
+  group_by(plotID, scientificName) %>% 
+  summarise(count = sum(individualCount, na.rm=TRUE)) %>% 
+  pivot_wider(names_from = "scientificName", values_from = "count", values_fill = 0) %>% 
+  tibble::column_to_rownames("plotID") %>%
+  as.matrix()
+```
+
+(Wouldn't it be nice if community ecologists learned about Cobb's normal forms?)
+
+
+### Eeek...
+
+```{r}
+library(rich)
+o1 <-rich::rich(matrix=abby2017, nrandom=99)
+
+## (Why so dumb about choice of data  return structures...)
+cols <- gsub("\\w{2}\\.(\\w+)", "\\1", names(o1$bootCR))
+colnames(o1$bootMR) <- cols
+colnames(o1$bootCR) <- cols
+class(o1$bootCR)
+rownames(o1$bootMR) <- "mr"
+rownames(o1$bootCR) <- "cr"
+out <- rbind(o1$bootMR, o1$bootCR)
+out
+
+
+```
+
+EEk
+
+```{r}
+library(SpadeR)
+data(ChaoSpeciesData)
+
+o2 <- SpadeR::ChaoSpecies(abby2017, datatype =  "abundance")
+```
+
+
 

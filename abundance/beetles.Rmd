@@ -14,34 +14,63 @@ library(tidyverse)
 ```{r}
 # neonstore::neon_download("DP1.10022.001")
 bet_sorting <- neonstore::neon_read("bet_sorting")
+sites <- neonstore:::neon_sites() 
+
 ```
+
 
 ```{r}
-beetles$bet_sorting %>% count(siteID, plotID, collectDate, scientificName, sort = TRUE)
+bet_ts <- bet_sorting %>% 
+  select(collectDate, siteID, domainID, scientificName, individualCount) %>%
+  mutate(month = format(collectDate, "%Y-%m")) %>% 
+  mutate(month = as.Date(paste(month, "01", sep="-"))) %>%
+  group_by(scientificName, month, siteID, domainID) %>%
+  summarize(count = sum(individualCount, na.rm = TRUE)) %>%
+  ungroup()
 ```
+
+## Counts
+
+First let's take a quick look at the raw counts data.  This is less meaningful than abundance,
+since we would need to account for detection probability, and effort is not entirely constant over
+time or necessarily equal across sites.  Details of the estimation of beetle density will need to
+take into account the specifics of the pitfall sampling design.  For now, let's consider only the
+raw counts, which are much simpler to work with and free from assumptions required to estimate abundance:
+
+
+To start, here is cumulative counts across all beetles: shows an increase which is no doubt connected 
+to increased sampling effort as sites come online, along with an obvious seasonal 
+pattern...
+
 
 ```{r}
-# plotID includes siteID 
-#beetles$bet_sorting %>% count(taxonRank, sort = TRUE)
-## consider fitlering to taxonRank
-beetle_plot_counts <- beetles$bet_sorting %>% 
-  filter(taxonRank == "species") %>% 
-  group_by(plotID, collectDate, scientificName)  %>% 
-  summarise(plotAve = mean(individualCount)) %>% ungroup()
+totals <- bet_ts %>% 
+  group_by(month) %>%
+  summarize(count = sum(count, na.rm = TRUE)) %>%
+  ungroup()
 
-beetle_site_counts <- beetles$bet_sorting %>% 
-  group_by(siteID, collectDate, scientificName)  %>% 
-  summarise(siteCount = sum(individualCount)) %>% ungroup()
-
-beetle_site_counts %>%  group_by(scientificName)  %>% summarise(totals= sum(siteCount)) %>% arrange(desc(totals)) %>% head(9) -> common
-beetle_site_counts %>% count(siteID, sort = TRUE) %>% head(6) -> main_sites
+totals %>% ggplot(aes(month, count)) + geom_line() + geom_point()
 ```
 
-
-And once again the patterns would seem to be entirely dominated entirely by sampling effort
 
 ```{r}
-beetle_site_counts %>% inner_join(main_sites) %>% inner_join(common) %>%
-  ggplot(aes(collectDate, siteCount, col = siteID)) + geom_point() + facet_wrap(~scientificName, scales = "free_y")
+bysite <- bet_ts %>% 
+  group_by(month, siteID, domainID) %>%
+  summarize(count = sum(count, na.rm = TRUE)) %>%
+  ungroup()
 
+domains <- sites %>% select(domainCode, domainName) %>% distinct()
+bet_domain <- bysite %>% left_join(domains, by = c(domainID = "domainCode"))
 ```
+
+```{r fig.width=10, fig.height=20}
+
+bet_domain %>% ggplot(aes(month, count)) + geom_line() + geom_point() + 
+  facet_wrap(~domainName, ncol = 3, scale = "free_y")
+```
+
+
+
+
+
+
