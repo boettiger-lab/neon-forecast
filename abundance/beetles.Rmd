@@ -14,7 +14,9 @@ library(tidyverse)
 ```{r}
 # neonstore::neon_download("DP1.10022.001")
 bet_sorting <- neonstore::neon_read("bet_sorting")
+# bet_sorting <- read_csv("../data/bet_sorting-basic.csv") # Ben's hack
 sites <- neonstore:::neon_sites() 
+
 
 ```
 
@@ -27,6 +29,13 @@ bet_ts <- bet_sorting %>%
   group_by(scientificName, month, siteID, domainID) %>%
   summarize(count = sum(individualCount, na.rm = TRUE)) %>%
   ungroup()
+
+bet_samples <- bet_sorting %>% 
+  select(collectDate, siteID, plotID, domainID, trapID, scientificName, individualCount )%>%
+  mutate(month = format(collectDate, "%Y-%m")) %>% 
+  mutate(month = as.Date(paste(month, "01", sep="-"))) %>%
+  group_by(scientificName, month, siteID, domainID)
+
 ```
 
 ## Counts
@@ -141,4 +150,227 @@ nmix$calculate()
 ```
 
 and now time for some max likelihood or MCMC estimation...
+
+### Ben's try
+
+I'm going to start by taking a look at just one site & one species.
+
+```{r}
+species_cts <- bet_samples %>% 
+  filter(!is.na(scientificName)) %>% 
+  group_by(scientificName, siteID, month) %>% 
+  count() %>% arrange(-n)
+
+# I arbitrarily pick siteID "GRSM" and species "Carabus goryi" in month "05-01-2017"
+
+spec_site_dat <- bet_samples %>% 
+  filter(scientificName == "Carabus goryi", 
+         siteID == "GRSM",
+         month == as.Date("2017-05-01"))
+```
+
+
+
+We'll put together a nimbleModel for these data.
+
+```{r}
+nmix_onesite_code <- nimbleCode({
+  for (plot in 1:nplot) {
+    # Each set 
+    y[start[plot]:end[plot]] ~ 
+        dNmixture_s(lambda = lambda,
+                    prob = prob,
+                    Nmin = 0,
+                    Nmax = 800,
+                    len = 1 + end[plot] - start [plot])
+  }
+  
+  lambda ~ dunif(0, 10000)
+  prob ~ dunif(0, 1)
+})
+
+
+# The following code gets me the start and end vectors of the data each plot
+spec_site_dat <- spec_site_dat %>% 
+                 mutate(plot_int = as.numeric(as.factor(spec_site_dat$plotID))) %>% 
+                 arrange(plot_int)
+
+start_vec <- numeric(max(spec_site_dat$plot_int))
+end_vec <- numeric(max(spec_site_dat$plot_int))
+
+for (i in 1:length(start_vec)) {
+  start_vec[i] <- min(which(spec_site_dat$plot_int == i))
+  end_vec[i] <- max(which(spec_site_dat$plot_int == i))
+}
+
+```
+
+
+```{r}
+
+onesite_model <- nimbleModel(nmix_onesite_code,
+                             constants = list(start = start_vec,
+                                              end = end_vec,
+                                              nplot = length(start_vec)),
+                             data = list(y = spec_site_dat$individualCount),
+                             inits = list(prob = 0.5, 
+                                          lambda = mean(spec_site_dat$individualCount) * 2))
+```
+
+With this very simple model, we could use MCMC or MLE. I'll demo an easy MCMC
+workflow so that we can use it even as the model gets more complicated.
+
+
+```{r}
+onesite_MCMC <- buildMCMC(onesite_model)
+
+Cmodel <- compileNimble(onesite_model)
+CMCMC <- compileNimble(onesite_MCMC)
+
+```
+
+```{r}
+samples <- runMCMC(CMCMC, niter = 50000, nburnin = 5000)
+
+plot(samples[,1], type = "l")
+plot(density(samples[,1]))
+
+plot(samples[,2], type = "l")
+plot(density(samples[,1]))
+```
+
+The mixing looks bad because the model is close to unidentifiable with constant p
+and constant lambda, so I expect that as we increase model complexity (to a
+degree) things will improve.
+
+I'll check this by using more than one month. I'll put month as a covariate on
+abundance and plot as a random effect on detection probability.
+
+```{r}
+# Grab the data:
+spec_site_dat_ts <- bet_samples %>% 
+  filter(scientificName == "Carabus goryi", 
+         siteID == "GRSM")
+
+# create a unique ID for each spacetime unit with closure
+spec_site_dat_ts <- spec_site_dat_ts %>% 
+      mutate(spacetime_plot = paste0(plotID, month))
+
+# To save myself the static typing headache, drop any spacetime plots
+# with fewer than 2 observations
+spacetime_cts <- spec_site_dat_ts %>% 
+            group_by(spacetime_plot) %>% 
+            count()
+spec_site_dat_ts <- left_join(spec_site_dat_ts, spacetime_cts) %>% 
+                        filter(n > 1)
+
+
+spec_site_dat_ts$plot_int <- as.numeric(as.factor(spec_site_dat_ts$spacetime_plot))
+
+mod_dat <- arrange(spec_site_dat_ts, plot_int)
+      
+```
+
+
+
+
+```{r}
+nmix_spacetime_code <- nimbleCode({
+  
+  # for each spacetime plot...
+  for (st in 1:nspacetime) {
+    
+    # Mean abundance is a log-linked linear combo with which month it is
+    log(lambda[st]) <- abund_int + beta_month * month[st]
+    
+    # Prob of detection is a logit-linked random effect on which geog plot it is
+    logit(prob[st]) <- prob_int + pranef[geoplot[st]]
+    
+    # Each set 
+    y[start[st]:end[st]] ~ 
+        dNmixture_s(lambda = lambda[st],
+                    prob = prob[st],
+                    Nmin = 0,
+                    Nmax = 1000,
+                    len = 1 + end[st] - start[st])
+  }
+  
+  
+  # Priors
+  beta_month ~ dnorm(0, sd = 1000)
+  abund_int ~ dnorm(0, sd = 1000)
+  prob_int ~ dnorm(0, sd = 1000)
+  pranef_sd ~ dunif(0, 100)
+  for (i in 1:ngeoplots) {
+    pranef[i] ~ dnorm(0, sd = pranef_sd)
+  }
+
+  
+})
+
+
+# The following code gets me the start and end vectors of the data each plot
+start_vec <- numeric(max(mod_dat$plot_int))
+end_vec <- numeric(max(mod_dat$plot_int))
+
+for (i in 1:length(start_vec)) {
+  start_vec[i] <- min(which(mod_dat$plot_int == i))
+  end_vec[i] <- max(which(mod_dat$plot_int == i))
+}
+
+```
+
+
+```{r}
+
+spacetime_model <- nimbleModel(nmix_spacetime_code,
+                             constants = list(start = start_vec,
+                                              end = end_vec,
+                                              nspacetime = length(start_vec),
+                                              ngeoplots = length(unique(mod_dat$plotID)),
+                                              month = as.numeric(scale(month(mod_dat$month))),
+                                              geoplot = as.numeric(as.factor(mod_dat$plotID))
+                                              ),
+                             data = list(y = mod_dat$individualCount),
+                             inits = list(prob_int = 0, 
+                                          pranef_sd = 1,
+                                          pranef = rnorm(length(unique(mod_dat$plotID)), 0, 1),
+                                          abund_int = mean(mod_dat$individualCount) * 2,
+                                          beta_month = 0))
+```
+Back to MCMC.
+
+
+
+```{r}
+spacetime_MCMC <- buildMCMC(spacetime_model)
+
+Cmodel <- compileNimble(spacetime_model)
+CMCMC <- compileNimble(spacetime_MCMC)
+
+```
+
+
+```{r}
+samples <- runMCMC(CMCMC, niter = 5000, nburnin = 1000)
+for (i in 1:ncol(samples)) {
+  plot(samples[,i], type = "l", main = colnames(samples)[i])
+  plot(density(samples[,i]), main = colnames(samples)[i])
+}
+``` 
+
+This is still mixing poorly but probably isn't worth worrying too much about at this step.
+
+Our predicted values of interest:
+
+```{r}
+# Mean expectation of abundance
+exp(mean(samples[,"abund_int"]))
+# Linear relationship btw month abundance on the log scale (probably not a great model)
+mean(samples[,"beta_month"])
+# mean expectation of detection rate
+expit(mean(samples[, "prob_int"]))
+# How much does detection vary from plot to plot, on the logit scale?
+mean(samples[, "pranef_sd"])
+```
 
