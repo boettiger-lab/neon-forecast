@@ -15,7 +15,6 @@ library(tidyverse)
 # neonstore::neon_download("DP1.10093.001")
 tck <- neonstore::neon_read("tck_taxonomyRaw-expanded")
 sites <- neonstore:::neon_sites() 
-
 ```
 
 
@@ -59,7 +58,27 @@ totals %>% ggplot(aes(month, count)) + geom_line() + geom_point()
 tck_ts %>% count(month, sort = TRUE)
 ```
 
+## abundance estimates
 
+```{r}
+## now the fun starts
+library(nimbleEcology)
+```
+
+```{r}
+## subsample divides sample by gender etc
+tck %>% filter(sampleID == "HARV_004.20140602")
+
+```
+
+
+```{r}
+ tck %>% 
+  mutate(siteID = gsub("(\\w+{4})_\\d{3}", "\\1", plotID)) %>%  # NEON forgot this field this time...
+  group_by(collectDate, siteID, plotID, sampleID, scientificName, individualCount) %>%
+  summarize(count = sum(individualCount))
+
+```
 
 
 
