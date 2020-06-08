@@ -16,6 +16,19 @@ library(lubridate)
 brd_countdata <- neonstore::neon_read("brd_countdata-expanded", col_types = vroom::cols(.default = "c"))
 ```
 
+richness by month across all sites
+
+```{r}
+ brd_countdata %>%
+  mutate(date = as.Date.POSIXct(startDate, "%Y-%m-%d")) %>% 
+  mutate(month = format(date, "%Y-%m")) %>% 
+  mutate(month = as.Date(paste(month, "01", sep="-"))) %>%
+  select(scientificName, month, siteID) %>% 
+  distinct() %>%
+  count(month) %>% 
+  ggplot(aes(month, n)) + geom_line() + geom_point()
+```
+
 
 ```{r}
 richness <- brd_countdata %>%

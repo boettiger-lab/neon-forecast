@@ -10,6 +10,7 @@ library(lubridate)
 ``` r
 # neonstore::neon_download("DP1.20120.001")
 inv <- neonstore::neon_read("inv_taxonomyRaw-expanded")
+sites <- neonstore::neon_sites() %>% select(siteID = siteCode, domainCode, domainName)
 ```
 
 ``` r
@@ -36,9 +37,43 @@ richness
     ## 10 BARC    2017    96
     ## # … with 129 more rows
 
+# richness, monthly
+
+``` r
+inv %>%
+  mutate(month = format(collectDate, "%Y-%m")) %>% 
+  mutate(month = as.Date(paste(month, "01", sep="-"))) %>%
+  select(scientificName, month) %>% 
+  distinct() %>%
+  count(month) %>% 
+  ggplot(aes(month, n)) + geom_line() + geom_point()
+```
+
+![](macroinvert_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
+
+``` r
+inv %>%
+  mutate(month = format(collectDate, "%Y-%m")) %>% 
+  mutate(month = as.Date(paste(month, "01", sep="-"))) %>%
+  left_join(sites) %>%
+  select(scientificName, month, domainName) %>% 
+  distinct() %>%
+  count(month, domainName) %>% 
+  ggplot(aes(month, n)) + geom_line() + geom_point() + facet_wrap(~domainName, ncol = 3)
+```
+
+    ## Joining, by = "siteID"
+
+![](macroinvert_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
+
 ## Let’s forecast richness at each site in the following year\!
 
 ``` r
 forecast <- richness %>% group_by(siteID) %>% summarize(forecast = mean(n), sd = sd(n))
+```
+
+    ## `summarise()` ungrouping output (override with `.groups` argument)
+
+``` r
 readr::write_csv(forecast, "macroinvert_richness.csv")
 ```

@@ -15,6 +15,8 @@ library(lubridate)
 ```{r message = FALSE}
 # neonstore::neon_download("DP1.20120.001")
 inv <- neonstore::neon_read("inv_taxonomyRaw-expanded")
+sites <- neonstore::neon_sites() %>% select(siteID = siteCode, domainCode, domainName)
+
 ```
 
 
@@ -26,6 +28,31 @@ richness <- inv %>%
   count(siteID, year)
 richness
 ```
+
+# richness, monthly
+
+```{r}
+inv %>%
+  mutate(month = format(collectDate, "%Y-%m")) %>% 
+  mutate(month = as.Date(paste(month, "01", sep="-"))) %>%
+  select(scientificName, month) %>% 
+  distinct() %>%
+  count(month) %>% 
+  ggplot(aes(month, n)) + geom_line() + geom_point()
+```
+
+
+```{r fig.height=8}
+inv %>%
+  mutate(month = format(collectDate, "%Y-%m")) %>% 
+  mutate(month = as.Date(paste(month, "01", sep="-"))) %>%
+  left_join(sites) %>%
+  select(scientificName, month, domainName) %>% 
+  distinct() %>%
+  count(month, domainName) %>% 
+  ggplot(aes(month, n)) + geom_line() + geom_point() + facet_wrap(~domainName, ncol = 3)
+```
+
 
 
 ## Let's forecast richness at each site in the following year!

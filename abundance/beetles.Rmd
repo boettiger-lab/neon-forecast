@@ -15,7 +15,7 @@ library(tidyverse)
 # neonstore::neon_download("DP1.10022.001")
 bet_sorting <- neonstore::neon_read("bet_sorting")
 # bet_sorting <- read_csv("../data/bet_sorting-basic.csv") # Ben's hack
-sites <- neonstore:::neon_sites() 
+sites <- neonstore::neon_sites() 
 
 
 ```
@@ -93,82 +93,50 @@ library(nimbleEcology)
 > Ground beetles are sampled using pitfall traps (16 oz deli containers filled with 150 or 250 mL of propylene glycol). Four traps are deployed in each of 10 plots at each terrestrial NEON site (40 traps per site), with traps arrayed approximately 20 meters from the center of the plot in each of the four cardinal directions. Sampling occurs biweekly throughout the growing season (when temperatures are above 4 degrees C).
 
 
-Sum all beetles in the trap
+--------------
 
-```{r}
-trap_totals <- bet_sorting %>% 
-  select(collectDate, siteID, plotID, trapID, scientificName, individualCount) %>%
-  group_by(collectDate, trapID, plotID, siteID) %>%
-  summarize(count = sum(individualCount, na.rm = TRUE)) %>%
-  ungroup()
-```
-
-Actually, let's start with 1 site, and sum the 4 traps in each plot, leaving us with just the 10 plots per collectionDate
-
-```{r}
-ornl <- bet_sorting %>% 
-  filter(siteID == "ORNL") %>%
-  group_by(plotID, collectDate) %>%
-  summarize(count = sum(individualCount, na.rm = TRUE)) %>%
-  ungroup() %>% arrange(collectDate)
-```
-
-Okay, here's 10 plots for the first date:
-
-```{r}
-d1 <- ornl %>% filter(collectDate == as.Date("2014-06-03"))
-d1
-```
-
-```{r}
-len <- length(d1$count)
-dat <- d1$count
-lambda <- mean(d1$count) * 100
-prob <- rep(.01, len)
-```
-
-```{r}
-# Define code for a nimbleModel
- nc <- nimbleCode({
-   x[1:5] ~ dNmixture_v(lambda, prob = prob[1:5],
-                        Nmin = -1, Nmax = -1, len = 5)
-
-   lambda ~ dunif(0, 1000)
-
-   for (i in 1:5) {
-     prob[i] ~ dunif(0, 1)
-   }
- })
-
-# Build the model
-nmix <- nimbleModel(nc,
-                    data = list(x = dat),
-                    inits = list(lambda = lambda,
-                                 prob = prob))
-# Calculate log probability of data from the model
-nmix$calculate()
-```
-
-and now time for some max likelihood or MCMC estimation...
 
 ### Ben's try
 
-I'm going to start by taking a look at just one site & one species.
 
 ```{r}
-species_cts <- bet_samples %>% 
-  filter(!is.na(scientificName)) %>% 
-  group_by(scientificName, siteID, month) %>% 
-  count() %>% arrange(-n)
-
-# I arbitrarily pick siteID "GRSM" and species "Carabus goryi" in month "05-01-2017"
-
-spec_site_dat <- bet_samples %>% 
-  filter(scientificName == "Carabus goryi", 
-         siteID == "GRSM",
-         month == as.Date("2017-05-01"))
+bet_sorting <- neonstore::neon_read("bet_sorting")
 ```
 
+I'm going to start by taking a look at just one site & one species.
+I arbitrarily pick siteID "GRSM" and species "Carabus goryi" in month "05-01-2017"
+
+
+```{r}
+bet_sorting %>% filter(siteID == "ORNL") %>% count(scientificName, sort=TRUE)
+
+spec_site_dat <- bet_sorting %>% 
+  filter(scientificName == "Cyclotrachelus fucatus", 
+         siteID == "ORNL",
+         collectDate == as.Date("2014-06-03")) %>% count(trapID)
+
+
+
+%>% 
+  mutate(trapID = paste(plotID, trapID, sep="_"),
+    plot_int = as.numeric(as.factor(spec_site_dat$plotID))) %>% 
+  arrange(trapID)
+
+spec_site_dat
+```
+
+
+
+```{r}
+# The following code gets me the start and end vectors of the data each plot
+start_vec <- numeric(max(spec_site_dat$plot_int))  # numeric(10L) - we have 10 plots per site
+end_vec <- numeric(max(spec_site_dat$plot_int))
+
+for (i in 1:length(start_vec)) {
+  start_vec[i] <- min(which(spec_site_dat$plot_int == i))
+  end_vec[i] <- max(which(spec_site_dat$plot_int == i))
+}
+```
 
 
 We'll put together a nimbleModel for these data.
@@ -189,19 +157,6 @@ nmix_onesite_code <- nimbleCode({
   prob ~ dunif(0, 1)
 })
 
-
-# The following code gets me the start and end vectors of the data each plot
-spec_site_dat <- spec_site_dat %>% 
-                 mutate(plot_int = as.numeric(as.factor(spec_site_dat$plotID))) %>% 
-                 arrange(plot_int)
-
-start_vec <- numeric(max(spec_site_dat$plot_int))
-end_vec <- numeric(max(spec_site_dat$plot_int))
-
-for (i in 1:length(start_vec)) {
-  start_vec[i] <- min(which(spec_site_dat$plot_int == i))
-  end_vec[i] <- max(which(spec_site_dat$plot_int == i))
-}
 
 ```
 
