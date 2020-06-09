@@ -12,7 +12,7 @@ library(tidyverse)
 
 
 ```{r}
-# neonstore::neon_download("DP1.10022.001")
+neonstore::neon_download("DP1.10022.001")
 bet_sorting <- neonstore::neon_read("bet_sorting")
 # bet_sorting <- read_csv("../data/bet_sorting-basic.csv") # Ben's hack
 sites <- neonstore::neon_sites() 
@@ -96,50 +96,89 @@ library(nimbleEcology)
 --------------
 
 
-### Ben's try
+## Ben's try
 
 
 ```{r}
-bet_sorting <- neonstore::neon_read("bet_sorting")
+library(neonstore)
+bet_sorting <- neon_read("bet_sorting", dir = "/home/shared-data/neonstore/")
+bet_raw <- neon_read("bet_fielddata-basic", dir = "/home/shared-data/neonstore/")
 ```
+
+I want a list of each trap x plot x site combination.
+
+```{r}
+all_locs <- bet_raw %>% 
+            select(trapID, plotID, siteID) %>% 
+            distinct() %>% 
+            arrange(plotID)
+```
+
+
+Now when I get data for a specific date, I'll associate it with the list stored
+in `all_locs` and put in 0s for any site that didn't have species collected
+on that date.
 
 I'm going to start by taking a look at just one site & one species.
-I arbitrarily pick siteID "GRSM" and species "Carabus goryi" in month "05-01-2017"
 
 
 ```{r}
-bet_sorting %>% filter(siteID == "ORNL") %>% count(scientificName, sort=TRUE)
-
-spec_site_dat <- bet_sorting %>% 
-  filter(scientificName == "Cyclotrachelus fucatus", 
-         siteID == "ORNL",
-         collectDate == as.Date("2014-06-03")) %>% count(trapID)
+bet_sorting %>% 
+  filter(siteID == "ORNL") %>% 
+  count(scientificName, sort=TRUE)
 
 
-
-%>% 
-  mutate(trapID = paste(plotID, trapID, sep="_"),
-    plot_int = as.numeric(as.factor(spec_site_dat$plotID))) %>% 
-  arrange(trapID)
-
-spec_site_dat
-```
-
-
-
-```{r}
-# The following code gets me the start and end vectors of the data each plot
-start_vec <- numeric(max(spec_site_dat$plot_int))  # numeric(10L) - we have 10 plots per site
-end_vec <- numeric(max(spec_site_dat$plot_int))
-
-for (i in 1:length(start_vec)) {
-  start_vec[i] <- min(which(spec_site_dat$plot_int == i))
-  end_vec[i] <- max(which(spec_site_dat$plot_int == i))
+prep_dat_onesitedate <- function(site, date, species,
+                                 bet_sorting, all_locs) {
+  spec_site_dat <- bet_sorting %>% 
+    filter(scientificName == species, 
+           siteID == site,
+           collectDate == date) %>% 
+    select(siteID, plotID, trapID, collectDate, individualCount) %>% 
+    arrange(plotID, trapID) %>% 
+    distinct()
+  
+  all_locs_this_site <- all_locs %>% 
+    filter(siteID == site)
+    
+  all_loc_data <- left_join(all_locs_this_site, spec_site_dat,
+                            by = c("siteID", "plotID", "trapID"))
+  all_loc_data$collectDate <- date
+  all_loc_data$individualCount[is.na(all_loc_data$individualCount)] <- 0
+  
+  all_loc_data <- all_loc_data %>% 
+    mutate(plot_int = as.numeric(as.factor(paste0(siteID, plotID, collectDate)))) %>% 
+    arrange(plot_int)    
+  
+  return(all_loc_data)
 }
+
+# The following code gets me the start and end vectors of the data each plot
+get_start_end <- function(model_data) {
+  start_vec <- numeric(max(model_data$plot_int))
+  end_vec <- numeric(max(model_data$plot_int))
+  
+  for (i in 1:length(start_vec)) {
+    start_vec[i] <- min(which(model_data$plot_int == i))
+    end_vec[i] <- max(which(model_data$plot_int == i))
+  }
+  return(list(start = start_vec, end = end_vec))
+}
+
+
+```
+
+Apply the functions I wrote to a selected site and date.
+
+```{r}
+model_data <- prep_dat_onesitedate(site = "ORNL", date = as.Date("2014-06-03"),
+                                   species = "Cyclotrachelus fucatus",
+                                   bet_sorting, all_locs)
+start_end_vecs <- get_start_end(model_data)
 ```
 
 
-We'll put together a nimbleModel for these data.
+Now I put together a nimbleModel for these data.
 
 ```{r}
 nmix_onesite_code <- nimbleCode({
@@ -157,17 +196,11 @@ nmix_onesite_code <- nimbleCode({
   prob ~ dunif(0, 1)
 })
 
-
-```
-
-
-```{r}
-
 onesite_model <- nimbleModel(nmix_onesite_code,
-                             constants = list(start = start_vec,
-                                              end = end_vec,
-                                              nplot = length(start_vec)),
-                             data = list(y = spec_site_dat$individualCount),
+                             constants = list(start = start_end_vecs$start,
+                                              end = start_end_vecs$start,
+                                              nplot = max(model_dat$plot_int)),
+                             data = list(y = model_dat$individualCount),
                              inits = list(prob = 0.5, 
                                           lambda = mean(spec_site_dat$individualCount) * 2))
 ```
@@ -198,32 +231,31 @@ The mixing looks bad because the model is close to unidentifiable with constant 
 and constant lambda, so I expect that as we increase model complexity (to a
 degree) things will improve.
 
+### Ben's try #2: multiple dates
+
 I'll check this by using more than one month. I'll put month as a covariate on
 abundance and plot as a random effect on detection probability.
 
 ```{r}
-# Grab the data:
-spec_site_dat_ts <- bet_samples %>% 
-  filter(scientificName == "Carabus goryi", 
-         siteID == "GRSM")
+# Grab the data. Apply the original function across many dates, then 
+dates_needed <- bet_sorting %>% 
+                filter(siteID == "ORNL") %>% 
+                select(collectDate) %>%
+                unique()
 
-# create a unique ID for each spacetime unit with closure
-spec_site_dat_ts <- spec_site_dat_ts %>% 
-      mutate(spacetime_plot = paste0(plotID, month))
+model_data_list <- lapply(dates_needed$collectDate,
+                          prep_dat_onesitedate,
+                          site = "ORNL", species = "Cyclotrachelus fucatus",
+                          bet_sorting = bet_sorting,
+                          all_locs = all_locs)
+model_data_ts <- bind_rows(model_data_list)
+model_data_ts <- model_data_ts %>% 
+  mutate(plot_int = as.numeric(as.factor(paste0(siteID,
+                                                plotID,
+                                                collectDate)))) %>% 
+  arrange(plot_int)
 
-# To save myself the static typing headache, drop any spacetime plots
-# with fewer than 2 observations
-spacetime_cts <- spec_site_dat_ts %>% 
-            group_by(spacetime_plot) %>% 
-            count()
-spec_site_dat_ts <- left_join(spec_site_dat_ts, spacetime_cts) %>% 
-                        filter(n > 1)
-
-
-spec_site_dat_ts$plot_int <- as.numeric(as.factor(spec_site_dat_ts$spacetime_plot))
-
-mod_dat <- arrange(spec_site_dat_ts, plot_int)
-      
+start_end_vecs_ts <- get_start_end(model_data_ts)
 ```
 
 
@@ -262,21 +294,6 @@ nmix_spacetime_code <- nimbleCode({
 
   
 })
-
-
-# The following code gets me the start and end vectors of the data each plot
-start_vec <- numeric(max(mod_dat$plot_int))
-end_vec <- numeric(max(mod_dat$plot_int))
-
-for (i in 1:length(start_vec)) {
-  start_vec[i] <- min(which(mod_dat$plot_int == i))
-  end_vec[i] <- max(which(mod_dat$plot_int == i))
-}
-
-```
-
-
-```{r}
 
 spacetime_model <- nimbleModel(nmix_spacetime_code,
                              constants = list(start = start_vec,
