@@ -279,8 +279,6 @@ nmix_spacetime_code <- nimbleCode({
   for (i in 1:ngeoplots) {
     pranef[i] ~ dnorm(0, sd = pranef_sd)
   }
-
-  
 })
 
 spacetime_model <- nimbleModel(nmix_spacetime_code,
@@ -313,7 +311,7 @@ CMCMC <- compileNimble(spacetime_MCMC)
 
 
 ```{r}
-samples <- runMCMC(CMCMC, niter = 5000, nburnin = 1000)
+samples <- runMCMC(CMCMC, niter = 50000, nburnin = 1000)
 for (i in 1:ncol(samples)) {
   plot(samples[,i], type = "l", main = colnames(samples)[i])
   plot(density(samples[,i]), main = colnames(samples)[i])
