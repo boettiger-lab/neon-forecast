@@ -12,7 +12,7 @@ library(tidyverse)
 
 
 ```{r}
-neonstore::neon_download("DP1.10022.001")
+# neonstore::neon_download("DP1.10022.001")
 bet_sorting <- neonstore::neon_read("bet_sorting")
 # bet_sorting <- read_csv("../data/bet_sorting-basic.csv") # Ben's hack
 sites <- neonstore::neon_sites() 
@@ -100,18 +100,10 @@ library(nimbleEcology)
 
 
 ```{r}
+library(nimbleEcology)
 library(neonstore)
 bet_sorting <- neon_read("bet_sorting", dir = "/home/shared-data/neonstore/")
 bet_raw <- neon_read("bet_fielddata-basic", dir = "/home/shared-data/neonstore/")
-```
-
-I want a list of each trap x plot x site combination.
-
-```{r}
-all_locs <- bet_raw %>% 
-            select(trapID, plotID, siteID) %>% 
-            distinct() %>% 
-            arrange(plotID)
 ```
 
 
@@ -123,13 +115,8 @@ I'm going to start by taking a look at just one site & one species.
 
 
 ```{r}
-bet_sorting %>% 
-  filter(siteID == "ORNL") %>% 
-  count(scientificName, sort=TRUE)
-
-
 prep_dat_onesitedate <- function(site, date, species,
-                                 bet_sorting, all_locs) {
+                                 bet_sorting, bet_raw) {
   spec_site_dat <- bet_sorting %>% 
     filter(scientificName == species, 
            siteID == site,
@@ -138,10 +125,13 @@ prep_dat_onesitedate <- function(site, date, species,
     arrange(plotID, trapID) %>% 
     distinct()
   
-  all_locs_this_site <- all_locs %>% 
-    filter(siteID == site)
+  all_locs_this_sitedate <- bet_raw %>% 
+    filter(siteID == site) %>% 
+    filter(collectDate == date) %>% 
+    select(siteID, plotID, trapID, collectDate) %>% 
+    distinct()
     
-  all_loc_data <- left_join(all_locs_this_site, spec_site_dat,
+  all_loc_data <- left_join(all_locs_this_sitedate, spec_site_dat,
                             by = c("siteID", "plotID", "trapID"))
   all_loc_data$collectDate <- date
   all_loc_data$individualCount[is.na(all_loc_data$individualCount)] <- 0
@@ -173,7 +163,7 @@ Apply the functions I wrote to a selected site and date.
 ```{r}
 model_data <- prep_dat_onesitedate(site = "ORNL", date = as.Date("2014-06-03"),
                                    species = "Cyclotrachelus fucatus",
-                                   bet_sorting, all_locs)
+                                   bet_sorting, bet_raw)
 start_end_vecs <- get_start_end(model_data)
 ```
 
@@ -198,11 +188,11 @@ nmix_onesite_code <- nimbleCode({
 
 onesite_model <- nimbleModel(nmix_onesite_code,
                              constants = list(start = start_end_vecs$start,
-                                              end = start_end_vecs$start,
-                                              nplot = max(model_dat$plot_int)),
-                             data = list(y = model_dat$individualCount),
+                                              end = start_end_vecs$end,
+                                              nplot = max(model_data$plot_int)),
+                             data = list(y = model_data$individualCount),
                              inits = list(prob = 0.5, 
-                                          lambda = mean(spec_site_dat$individualCount) * 2))
+                                          lambda = mean(model_data$individualCount) * 2))
 ```
 
 With this very simple model, we could use MCMC or MLE. I'll demo an easy MCMC
@@ -224,31 +214,31 @@ plot(samples[,1], type = "l")
 plot(density(samples[,1]))
 
 plot(samples[,2], type = "l")
-plot(density(samples[,1]))
+plot(density(samples[,2]))
 ```
 
-The mixing looks bad because the model is close to unidentifiable with constant p
-and constant lambda, so I expect that as we increase model complexity (to a
-degree) things will improve.
+This mixing looks decent now.
 
 ### Ben's try #2: multiple dates
 
-I'll check this by using more than one month. I'll put month as a covariate on
+Now I'll look at multiple sampling periods. I'll put month as a covariate on
 abundance and plot as a random effect on detection probability.
 
 ```{r}
-# Grab the data. Apply the original function across many dates, then 
+# Grab the data. Apply the original function across any dates indicated for it.
 dates_needed <- bet_sorting %>% 
                 filter(siteID == "ORNL") %>% 
                 select(collectDate) %>%
                 unique()
 
+# Grab all the data for each date, then combine into one dataframe.
 model_data_list <- lapply(dates_needed$collectDate,
                           prep_dat_onesitedate,
                           site = "ORNL", species = "Cyclotrachelus fucatus",
                           bet_sorting = bet_sorting,
-                          all_locs = all_locs)
+                          bet_raw = bet_raw)
 model_data_ts <- bind_rows(model_data_list)
+# Redo the plot_ints
 model_data_ts <- model_data_ts %>% 
   mutate(plot_int = as.numeric(as.factor(paste0(siteID,
                                                 plotID,
@@ -268,23 +258,21 @@ nmix_spacetime_code <- nimbleCode({
   for (st in 1:nspacetime) {
     
     # Mean abundance is a log-linked linear combo with which month it is
-    log(lambda[st]) <- abund_int + beta_month * month[st]
+    log(lambda[st]) <- abund_int + beta_month * month[st] + 
+                        beta_month_sq * month[st] * month[st]
     
     # Prob of detection is a logit-linked random effect on which geog plot it is
     logit(prob[st]) <- prob_int + pranef[geoplot[st]]
     
-    # Each set 
-    y[start[st]:end[st]] ~ 
-        dNmixture_s(lambda = lambda[st],
-                    prob = prob[st],
-                    Nmin = 0,
-                    Nmax = 1000,
-                    len = 1 + end[st] - start[st])
+    # Use latent states
+    N[st] ~ dpois(lambda[st])
+    for (i in start[st]:end[st]) y[i] ~ dbinom(N[st], prob = prob[st])
   }
   
   
   # Priors
   beta_month ~ dnorm(0, sd = 1000)
+  beta_month_sq ~ dnorm(0, sd = 1000)
   abund_int ~ dnorm(0, sd = 1000)
   prob_int ~ dnorm(0, sd = 1000)
   pranef_sd ~ dunif(0, 100)
@@ -296,22 +284,24 @@ nmix_spacetime_code <- nimbleCode({
 })
 
 spacetime_model <- nimbleModel(nmix_spacetime_code,
-                             constants = list(start = start_vec,
-                                              end = end_vec,
-                                              nspacetime = length(start_vec),
-                                              ngeoplots = length(unique(mod_dat$plotID)),
-                                              month = as.numeric(scale(month(mod_dat$month))),
-                                              geoplot = as.numeric(as.factor(mod_dat$plotID))
+                             constants = list(start = start_end_vecs_ts$start,
+                                              end = start_end_vecs_ts$end,
+                                              nspacetime = length(start_end_vecs_ts$end),
+                                              ngeoplots = length(unique(model_data_ts$plotID)),
+                                              month = as.numeric(scale(month(model_data_ts$collectDate))),
+                                              geoplot = as.numeric(as.factor(model_data_ts$plotID))
                                               ),
-                             data = list(y = mod_dat$individualCount),
+                             data = list(y = model_data_ts$individualCount),
                              inits = list(prob_int = 0, 
                                           pranef_sd = 1,
-                                          pranef = rnorm(length(unique(mod_dat$plotID)), 0, 1),
-                                          abund_int = mean(mod_dat$individualCount) * 2,
-                                          beta_month = 0))
+                                          pranef = rnorm(length(unique(model_data_ts$plotID)), 0, 1),
+                                          abund_int = log(mean(model_data_ts$individualCount) * 2),
+                                          beta_month = 0,
+                                          beta_month_sq = 0))
 ```
-Back to MCMC.
 
+
+Back to MCMC.
 
 
 ```{r}
@@ -319,7 +309,6 @@ spacetime_MCMC <- buildMCMC(spacetime_model)
 
 Cmodel <- compileNimble(spacetime_model)
 CMCMC <- compileNimble(spacetime_MCMC)
-
 ```
 
 
@@ -338,11 +327,129 @@ Our predicted values of interest:
 ```{r}
 # Mean expectation of abundance
 exp(mean(samples[,"abund_int"]))
-# Linear relationship btw month abundance on the log scale (probably not a great model)
+# Quadratic relationship btw month abundance on the log scale (probably not a great model)
 mean(samples[,"beta_month"])
+mean(samples[,"beta_month_sq"])
 # mean expectation of detection rate
 expit(mean(samples[, "prob_int"]))
 # How much does detection vary from plot to plot, on the logit scale?
 mean(samples[, "pranef_sd"])
 ```
+
+### Ben's try #3: use MLE
+
+We can't quite use the above model for MLE because of the many random effect
+latent states in p_ranef. If we change the way we parameterize the model
+to include only fixed effects, we can do MLE.
+
+(As a side note, MLE on the above model should become possible soon when NIMBLE's
+Laplace approximation method is out.)
+
+Until then, let's say the covariate on detection is a fixed effect on year, why not.
+
+```{r}
+nmix_spacetime_code <- nimbleCode({
+  
+  # for each spacetime plot...
+  for (st in 1:nspacetime) {
+    
+    # Mean abundance is a log-linked linear combo with which month it is
+    log(lambda[st]) <- abund_int + beta_month * month[start[st]] + 
+                        beta_month_sq * month[start[st]] * month[start[st]]
+    
+    # Prob of detection is a logit-linked random effect on which geog plot it is
+    logit(prob[st]) <- p_eff[year[start[st]]]
+    
+    # Each set 
+    y[start[st]:end[st]] ~ 
+        dNmixture_s(lambda = lambda[st],
+                    prob = prob[st],
+                    Nmin = 0,
+                    Nmax = 1000,
+                    len = 1 + end[st] - start[st])
+  }
+  
+  
+  # For MLE, we DON'T use priors, since we don't want these likelihoods
+  #   to end up in the calculation of log prob of y
+  # beta_month ~ dnorm(0, sd = 1000)
+  # beta_month_sq ~ dnorm(0, sd = 1000)
+  # abund_int ~ dnorm(0, sd = 1000)
+  # prob_int ~ dnorm(0, sd = 1000)
+  # for (i in 1:nyear) {
+  #   p_eff[i] ~ dnorm(0, sd = 1000)
+  # }
+})
+
+spacetime_model <- nimbleModel(nmix_spacetime_code,
+   constants = list(start = start_end_vecs_ts$start,
+                    end = start_end_vecs_ts$end,
+                    nspacetime = length(start_end_vecs_ts$end),
+                    nyear = length(unique(year(model_data_ts$collectDate))),
+                    month = as.numeric(scale(month(model_data_ts$collectDate))),
+                    year = as.numeric(as.factor(year(model_data_ts$collectDate)))
+                    ),
+   data = list(y = model_data_ts$individualCount),
+   inits = list(p_eff = rep(0, length(unique(year(model_data_ts$collectDate)))),
+                abund_int = log(mean(model_data_ts$individualCount) * 2),
+                beta_month = 0,
+                beta_month_sq = 0), 
+   calculate = F)
+
+# This is the log probability of the whole model (in this case Pr(y|theta))
+spacetime_model$calculate()
+```
+
+Here's a basic MLE pipeline.
+Basically, we're going to use R's optim function and pass it a compiled nimbleFunction
+that updates the values of the model we're interested in and returns logprob.
+
+```{r}
+wrt_nodes <- spacetime_model$expandNodeNames(c("p_eff", "abund_int", 
+                                               "beta_month", "beta_month_sq"))
+wrt_inits <- values(spacetime_model, wrt_nodes)
+
+
+# setAndCalculate returns a compilable object (nimbleFunction) that sets
+# nodes for a target value and then calculates the log likelihood
+my_sc <- setAndCalculate(model = spacetime_model, targetNodes = wrt_nodes)
+
+Cspacetime_model <- compileNimble(spacetime_model)
+Csc <- compileNimble(my_sc)
+
+Csc$run(rep(0.2, 10)) # Try once with some arbitrary parameter values
+Cspacetime_model$abund_int # Note that it actually modified the model globally
+```
+
+
+Now a call to optim with the objective function `Csc$run`. Fo
+
+As a note, NIMBLE has a feature in development which will handle model optimization
+a lot better using some internal tracking of derivatives that I won't claim to
+understand. But, soon, we may be able to replace this with `nimOptim()`.
+
+```{r}
+# This takes a while to run with all the data we have.
+# It will get slower if we add more data or more parameters (dimensions to optim)
+optim_result <- optim(par = wrt_inits,
+                      fn = Csc$run,
+                      hessian = TRUE,
+                      control = list(fnscale= -1))  # This control arg says we want max, not min
+
+param_ests <- tibble(param = wrt_nodes)
+
+# The parameter estimates are the optima:
+param_ests$mean <- optim_result$par
+
+# The estimated variance is the absolute value of the diagonal of the inverse of 
+# the (negative, bc we inverted it during optim) Hessian at the max
+param_ests$var <- abs(diag(solve(-optim_result$hessian)))
+param_ests$sd <- sqrt(param_ests$var)
+
+param_ests
+```
+
+
+
+
 
