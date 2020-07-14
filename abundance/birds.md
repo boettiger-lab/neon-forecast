@@ -6,8 +6,12 @@ distance-sampling based protocols in mind.
 library(lubridate)
 library(tidyverse)
 library(Distance)
+library(knitr)
 
 ## remotes::install_github("cboettig/neonstore")
+
+# use cache since model fitting can take a while
+opts_chunk$set(cache=TRUE)
 ```
 
 ``` r
@@ -64,36 +68,40 @@ bird_ds <- brd_countdata %>%
   mutate(year = lubridate::year(startDate), Area = 1)
 ```
 
-Not really sure on this, but I’m going to set sampling effort as the
-number of visits to a given point?
-
-``` r
-effort <- bird_ds %>% 
-  select(pointID,year) %>% 
-  distinct() %>% 
-  count(pointID)
-```
-
-Join the effort data back on by pointID
-
-``` r
-ds_data <- bird_ds %>%
-  left_join(rename(effort, Effort = n), by = "pointID")
-```
-
 Now rename columns to match `ds` columns, or reflect grouping variables
-(species, year).
+and interesting covariates.
 
 ``` r
 ds_data <- 
-  ds_data  %>% 
+  bird_ds  %>% 
+  mutate(Region.Label = paste(siteID, year, sep="-")) %>%
   select(scientificName, 
          year,
+         siteID,
+         plotID,
+         Region.Label,
+         obs_id = identifiedBy,
+         detection_method = detectionMethod,
          distance = observerDistance, 
-         Sample.Label = eventID, 
-         Region.Label = plotID, 
-         size = clusterSize)
+         Sample.Label = eventID,
+         size = clusterSize) %>%
+  mutate(obs_id = as.factor(obs_id),
+         Effort = 1,
+         detection_method = as.factor(detection_method))
 ```
+
+`eventID` gives identifies visit to a point sampler at a given time,
+this seems like a reasonable `Sample.Label` (if one wanted to ignore
+temporal differences `plotID` would be acceptable to identify only the
+point sampler location).
+
+`Region.Label` will give the level at which we wish to estimate
+abundance. A reasonable target for this might be a Neon site in a given
+year, this ensures replication at each location (since there are
+multiple points) so variance estimation will likely be better behaved.
+
+`Effort` is number of visits to sample unit (`Sample.Label`), so is 1
+for all entries.
 
 ## Selecting focal species
 
@@ -127,17 +135,30 @@ brd_countdata %>% select(plotID, scientificName) %>%
     ## 5 Corvus brachyrhynchos   277
     ## 6 Cardinalis cardinalis   255
 
-Cool, morning doves are common across sites and plots, let’s try
-something with those.
+Let’s mourning doves as they are common across sites and plots.
 
 ``` r
 doves <- ds_data %>% 
-  filter(scientificName == "Zenaida macroura", year == "2015") %>% 
+  filter(scientificName == "Zenaida macroura") %>% 
   as.data.frame()
 ```
 
+It seems reasonable to pool data over all years and expect detection to
+be similar (we should check this at some point by adding a covariate for
+year\!)
+
+First plot the histogram of distances:
+
 ``` r
-abund <- Distance::ds(doves, transect = "point")
+hist(doves$distance, xlab="Distance (m)", breaks=20)
+```
+
+![](birds_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+
+Fit a simple model, truncating at 500m to begin with:
+
+``` r
+df_dove_hn_cos_500 <- Distance::ds(doves, transect = "point", truncation=500)
 ```
 
     ## Starting AIC adjustment term selection.
@@ -146,213 +167,95 @@ abund <- Distance::ds(doves, transect = "point")
 
     ## Key only model: not constraining for monotonicity.
 
-    ## AIC= 2709.462
+    ## AIC= 44894.034
 
     ## Fitting half-normal key function with cosine(2) adjustments
 
-    ## AIC= 2683.766
+    ## AIC= 44429.404
 
     ## Fitting half-normal key function with cosine(2,3) adjustments
 
-    ## AIC= 2649.626
+    ## AIC= 44404.07
 
     ## Fitting half-normal key function with cosine(2,3,4) adjustments
 
-    ## AIC= 2638.611
+    ## AIC= 44382.826
 
     ## Fitting half-normal key function with cosine(2,3,4,5) adjustments
 
-    ## AIC= 2638.286
-
-    ## Fitting half-normal key function with cosine(2,3,4,5,6) adjustments
-
-    ## AIC= 2633.49
-
-    ## No survey area information supplied, only estimating detection function.
-
-Let’s hack the `Distance::ds` print method to provide a `data.frame`
-return object instead…
-
-``` r
-## Tidy the `ds` return object
- estimate_table <- function(abund) {
-  abund_summary <- summary(abund)
-  x <- abund_summary$ds
-  if(!is.null(x$Nhat)){
-    parameters = data.frame(Estimate = c(x$average.p,x$Nhat))
-    row.names(parameters) = c("Average p", "N in covered region")
-    if(!is.null(x$average.p.se)){
-      parameters$SE = c(x$average.p.se,x$Nhat.se)
-      parameters$CV = parameters$SE/parameters$Estimate
-    }
-  } else {
-    parameters = data.frame(Estimate = c(x$average.p))
-    row.names(parameters) = c("Average p")
-    if(!is.null(x$average.p.se)){
-      parameters$SE = c(x$average.p.se)
-      parameters$CV = parameters$SE/parameters$Estimate
-    }
-  }
-  out <- tibble::rownames_to_column(parameters)
-out
-}
-```
-
-We can not get a table summary of the results:
-
-``` r
-estimate_table(abund)
-```
-
-    ## # A tibble: 2 x 4
-    ##   rowname              Estimate        SE    CV
-    ##   <chr>                   <dbl>     <dbl> <dbl>
-    ## 1 Average p              0.0373   0.00384 0.103
-    ## 2 N in covered region 5791.     710.      0.123
-
-Now we can do multiple years at once:
-
-``` r
-estimate_ds <- function(df, ...){
-    m <- ds(as.data.frame(df), transect = "point")
-    estimate_table(m)
-}
-
-doves_abund <- ds_data %>% 
-  filter(scientificName == "Zenaida macroura") %>% 
-  group_by(year) %>%
-dplyr::group_modify(estimate_ds, keep = TRUE)
-```
-
-    ## Starting AIC adjustment term selection.
-
-    ## Fitting half-normal key function
-
-    ## Key only model: not constraining for monotonicity.
-
-    ## AIC= 997.455
-
-    ## Fitting half-normal key function with cosine(2) adjustments
-
-    ## AIC= 998.324
-
-    ## 
-    ## Half-normal key function selected.
-
-    ## No survey area information supplied, only estimating detection function.
-
-    ## Starting AIC adjustment term selection.
-
-    ## Fitting half-normal key function
-
-    ## Key only model: not constraining for monotonicity.
-
-    ## AIC= 2709.462
-
-    ## Fitting half-normal key function with cosine(2) adjustments
-
-    ## AIC= 2683.766
-
-    ## Fitting half-normal key function with cosine(2,3) adjustments
-
-    ## AIC= 2649.626
-
-    ## Fitting half-normal key function with cosine(2,3,4) adjustments
-
-    ## AIC= 2638.611
-
-    ## Fitting half-normal key function with cosine(2,3,4,5) adjustments
-
-    ## Error : 
-    ## gosolnp-->Could not find a feasible starting point...exiting
-
-    ## 
-    ## 
-    ## Error in model fitting, returning: half-normal key function with cosine(2,3,4) adjustments
-
-    ## 
-    ##   Error: Error in -lt$value : invalid argument to unary operator
-
-    ## No survey area information supplied, only estimating detection function.
-
-    ## Starting AIC adjustment term selection.
-
-    ## Fitting half-normal key function
-
-    ## Key only model: not constraining for monotonicity.
-
-    ## AIC= 3971.918
-
-    ## Fitting half-normal key function with cosine(2) adjustments
-
-    ## AIC= 3862.931
-
-    ## Fitting half-normal key function with cosine(2,3) adjustments
-
-    ## AIC= 3852.575
-
-    ## Fitting half-normal key function with cosine(2,3,4) adjustments
-
-    ## AIC= 3848.261
-
-    ## Fitting half-normal key function with cosine(2,3,4,5) adjustments
-
-    ## AIC= 3850.085
+    ## AIC= 44383.468
 
     ## 
     ## Half-normal key function with cosine(2,3,4) adjustments selected.
 
     ## No survey area information supplied, only estimating detection function.
 
+Plot that (both the detection function and PDF of distances):
+
+``` r
+par(mfrow=c(1,2))
+plot(df_dove_hn_cos_500)
+plot(df_dove_hn_cos_500, pdf=TRUE)
+```
+
+![](birds_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+
+PDF makes it look like there is some overfitting here – those extra
+adjustment terms are probably overfitting the tail.
+
+Rough rule of thumb that we want probability of detection to be
+\(\approx 0.15\) at the truncation distance, so we can truncate a lot
+more here:
+
+``` r
+df_dove_hn_cos_150 <- Distance::ds(doves, transect = "point", truncation=150)
+```
+
     ## Starting AIC adjustment term selection.
 
     ## Fitting half-normal key function
 
     ## Key only model: not constraining for monotonicity.
 
-    ## AIC= 13060.585
+    ## AIC= 26338.709
 
     ## Fitting half-normal key function with cosine(2) adjustments
 
-    ## AIC= 13000.977
+    ## AIC= 26325.007
 
     ## Fitting half-normal key function with cosine(2,3) adjustments
 
-    ## AIC= 13001.695
+    ## AIC= 26325.772
 
     ## 
     ## Half-normal key function with cosine(2) adjustments selected.
 
     ## No survey area information supplied, only estimating detection function.
 
-    ## Starting AIC adjustment term selection.
+Plot that:
 
-    ## Fitting half-normal key function
+``` r
+par(mfrow=c(1,2))
+plot(df_dove_hn_cos_150)
+plot(df_dove_hn_cos_150, pdf=TRUE)
+```
 
-    ## Key only model: not constraining for monotonicity.
+![](birds_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
 
-    ## AIC= 13517.31
+Maybe an issue here that the 2nd bin in this histograms looks too tall.
+This may be because observers are flushing birds? One way around this is
+to bin the distances.
 
-    ## Fitting half-normal key function with cosine(2) adjustments
+Then try to fit the model again using the `cutpoints=` argument
+(expanding the truncation a wee bit):
 
-    ## AIC= 13441.698
+``` r
+df_dove_hn_cos_200_bin <- Distance::ds(doves, transect = "point", truncation=200,
+                                       cutpoints=seq(0, 200, by=20))
+```
 
-    ## Fitting half-normal key function with cosine(2,3) adjustments
-
-    ## AIC= 13242.039
-
-    ## Fitting half-normal key function with cosine(2,3,4) adjustments
-
-    ## AIC= 13110.588
-
-    ## Fitting half-normal key function with cosine(2,3,4,5) adjustments
-
-    ## AIC= 13484.609
-
-    ## 
-    ## Half-normal key function with cosine(2,3,4) adjustments selected.
-
-    ## No survey area information supplied, only estimating detection function.
+    ## Warning in create.bins(data, cutpoints): Some distances were outside bins and
+    ## have been removed.
 
     ## Starting AIC adjustment term selection.
 
@@ -360,45 +263,256 @@ dplyr::group_modify(estimate_ds, keep = TRUE)
 
     ## Key only model: not constraining for monotonicity.
 
-    ## AIC= 11827.127
+    ## AIC= 14310.748
 
     ## Fitting half-normal key function with cosine(2) adjustments
 
-    ## AIC= 11693.325
-
-    ## Fitting half-normal key function with cosine(2,3) adjustments
-
-    ## AIC= 11677.009
-
-    ## Fitting half-normal key function with cosine(2,3,4) adjustments
-
-    ## AIC= 11672.18
-
-    ## Fitting half-normal key function with cosine(2,3,4,5) adjustments
-
-    ## AIC= 11674.167
+    ## AIC= 14312.143
 
     ## 
-    ## Half-normal key function with cosine(2,3,4) adjustments selected.
+    ## Half-normal key function selected.
 
     ## No survey area information supplied, only estimating detection function.
 
 ``` r
-doves_abund
+par(mfrow=c(1,2))
+plot(df_dove_hn_cos_200_bin)
+plot(df_dove_hn_cos_200_bin, pdf=TRUE)
 ```
 
-    ## # A tibble: 12 x 5
-    ##     year rowname               Estimate          SE     CV
-    ##    <dbl> <chr>                    <dbl>       <dbl>  <dbl>
-    ##  1  2013 Average p               0.111     0.0100   0.0897
-    ##  2  2013 N in covered region   718.       99.4      0.138 
-    ##  3  2015 Average p               0.0494    0.00425  0.0860
-    ##  4  2015 N in covered region  4371.      475.       0.109 
-    ##  5  2016 Average p               0.0544    0.00411  0.0755
-    ##  6  2016 N in covered region  6336.      582.       0.0919
-    ##  7  2017 Average p               0.0513    0.00120  0.0234
-    ##  8  2017 N in covered region 22142.      824.       0.0372
-    ##  9  2018 Average p               0.0211    0.000396 0.0188
-    ## 10  2018 N in covered region 52997.     1855.       0.0350
-    ## 11  2019 Average p               0.0502    0.00234  0.0466
-    ## 12  2019 N in covered region 20623.     1146.       0.0556
+![](birds_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
+
+That looks better behaved.
+
+Could also try with hazard-rate detection function:
+
+``` r
+df_dove_hr_cos_200_bin <- Distance::ds(doves, transect = "point", truncation=200,
+                                       key="hr", cutpoints=seq(0, 200, by=20))
+```
+
+    ## Warning in create.bins(data, cutpoints): Some distances were outside bins and
+    ## have been removed.
+
+    ## Starting AIC adjustment term selection.
+
+    ## Fitting hazard-rate key function
+
+    ## Key only model: not constraining for monotonicity.
+
+    ## AIC= 14254.22
+
+    ## Fitting hazard-rate key function with cosine(2) adjustments
+
+    ## AIC= 14254.642
+
+    ## 
+    ## Hazard-rate key function selected.
+
+    ## No survey area information supplied, only estimating detection function.
+
+``` r
+par(mfrow=c(1,2))
+plot(df_dove_hr_cos_200_bin)
+plot(df_dove_hr_cos_200_bin, pdf=TRUE)
+```
+
+![](birds_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
+
+Compare via AIC?
+
+``` r
+AIC(df_dove_hn_cos_200_bin, df_dove_hr_cos_200_bin)
+```
+
+    ## # A tibble: 2 x 2
+    ##      df    AIC
+    ##   <dbl>  <dbl>
+    ## 1     1 14311.
+    ## 2     2 14254.
+
+Not much in it\! What about goodness of fit?
+
+``` r
+ds.gof(df_dove_hn_cos_200_bin)
+```
+
+    ## 
+    ## Goodness of fit results for ddf object
+    ## 
+    ## Chi-square tests
+    ##                 [0,20]    (20,40]    (40,60]   (60,80]  (80,100] (100,120]
+    ## Observed  91.000000000 239.000000 353.000000 577.00000 571.00000  346.0000
+    ## Expected  90.787293126 258.366983 387.495907 463.09183 482.14101  452.6652
+    ## Chisquare  0.000498354   1.451734   3.070917  28.01836  16.37679   25.1344
+    ##            (120,140]  (140,160]    (160,180] (180,200]     Total
+    ## Observed  328.000000 277.000000 2.310000e+02  214.0000 3227.0000
+    ## Expected  389.826141 310.922476 2.310643e+02  160.6388 3227.0000
+    ## Chisquare   9.805581   3.701033 1.791689e-05   17.7256  105.2849
+    ## 
+    ## P = 0 with 8 degrees of freedom
+
+``` r
+ds.gof(df_dove_hr_cos_200_bin)
+```
+
+    ## 
+    ## Goodness of fit results for ddf object
+    ## 
+    ## Chi-square tests
+    ##              [0,20]     (20,40]    (40,60]    (60,80]   (80,100] (100,120]
+    ## Observed  91.000000 239.0000000 353.000000 577.000000 571.000000 346.00000
+    ## Expected  81.938318 245.8149115 407.703426 517.654448 504.864767 427.83474
+    ## Chisquare  1.002145   0.1889349   7.339808   6.803563   8.663447  15.65306
+    ##            (120,140]    (140,160]    (160,180]  (180,200]      Total
+    ## Observed  328.000000 277.00000000 231.00000000 214.000000 3227.00000
+    ## Expected  346.725067 279.57627293 227.43863858 187.449410 3227.00000
+    ## Chisquare   1.011257   0.02374015   0.05576579   3.760662   44.50239
+    ## 
+    ## P = 1.708e-07 with 7 degrees of freedom
+
+# Covariates
+
+What if group size affects detectability?
+
+``` r
+df_dove_hn_size_200_bin <- Distance::ds(doves, transect = "point", truncation=200,
+                                        formula=~size, cutpoints=seq(0, 200, by=20))
+```
+
+    ## Warning in create.bins(data, cutpoints): Some distances were outside bins and
+    ## have been removed.
+
+    ## Model contains covariate term(s): no adjustment terms will be included.
+
+    ## Fitting half-normal key function
+
+    ## AIC= 14309.722
+
+    ## No survey area information supplied, only estimating detection function.
+
+``` r
+df_dove_hr_size_200_bin <- Distance::ds(doves, transect = "point", truncation=200,
+                                        key="hr", formula=~size,
+                                        cutpoints=seq(0, 200, by=20))
+```
+
+    ## Warning in create.bins(data, cutpoints): Some distances were outside bins and
+    ## have been removed.
+
+    ## Model contains covariate term(s): no adjustment terms will be included.
+
+    ## Fitting hazard-rate key function
+
+    ## AIC= 14254.312
+
+    ## No survey area information supplied, only estimating detection function.
+
+(We *could* think about other covariates here. `obs_id` would be an
+option but it has 52 levels, that model takes a very long time to fit.)
+
+Which of those looks best via AIC?
+
+``` r
+AIC(df_dove_hn_cos_200_bin, df_dove_hr_cos_200_bin, df_dove_hr_size_200_bin, df_dove_hn_size_200_bin)
+```
+
+    ## # A tibble: 4 x 2
+    ##      df    AIC
+    ##   <dbl>  <dbl>
+    ## 1     1 14311.
+    ## 2     2 14254.
+    ## 3     3 14254.
+    ## 4     2 14310.
+
+Plot,
+
+``` r
+par(mfrow=c(2,2))
+plot(df_dove_hr_size_200_bin, main="hr_size", pdf=TRUE)
+plot(df_dove_hn_size_200_bin, main="hn_size", pdf=TRUE)
+plot(df_dove_hr_cos_200_bin, main="hr", pdf=TRUE)
+plot(df_dove_hn_cos_200_bin, main="hn", pdf=TRUE)
+```
+
+![](birds_files/figure-gfm/unnamed-chunk-20-1.png)<!-- -->
+
+# Results tables
+
+We can compare multiple models:
+
+``` r
+res_tab <- summarize_ds_models(df_dove_hn_cos_200_bin, df_dove_hr_cos_200_bin,
+                               df_dove_hr_size_200_bin, df_dove_hn_size_200_bin, output="plain")
+```
+
+And `kable` them:
+
+``` r
+kable(res_tab)
+```
+
+|   | Model                        | Key function | Formula | Chi^2 p-value | Average detectability | se(Average detectability) |  Delta AIC |
+| :- | :--------------------------- | :----------- | :------ | ------------: | --------------------: | ------------------------: | ---------: |
+| 2 | df\_dove\_hr\_cos\_200\_bin  | Hazard-rate  | \~1     |         2e-07 |             0.3938328 |                 0.0121846 |  0.0000000 |
+| 3 | df\_dove\_hr\_size\_200\_bin | Hazard-rate  | \~size  |         1e-07 |             0.3938030 |                 0.0122457 |  0.0918791 |
+| 4 | df\_dove\_hn\_size\_200\_bin | Half-normal  | \~size  |         0e+00 |             0.3501822 |                 0.0077644 | 55.5018771 |
+| 1 | df\_dove\_hn\_cos\_200\_bin  | Half-normal  | \~1     |         0e+00 |             0.3507792 |                 0.0073099 | 56.5285287 |
+
+# Per year abundance estimates
+
+We can do this in various ways (including via setting the `Region.Label`
+appropriately above and estimate at the same time as fitting).
+`Distance` also provides `dht2` which allows for more complex abundance
+estimation. Let’s use `df_dove_hr_cos_200_bin` as our detection function
+for these estimates.
+
+``` r
+# set the stratum areas to just be the covered area for that year
+doves_areas <- doves %>%
+  select(Region.Label, Sample.Label, Effort) %>%
+  distinct() %>%
+  mutate(Area=sum(Effort) * df_dove_hn_cos_200_bin$ddf$meta.data$width^2 * pi)
+# only 1 value here so we can cheat
+doves$Area <- doves_areas$Area[1]
+
+
+year_site_abund <- dht2(df_dove_hn_cos_200_bin, flatfile=doves,
+                        strat_formula=~Region.Label)
+```
+
+    ## Warning in `[<-.data.frame`(`*tmp*`, flatfile$Sample.Label %in% sl_diff, :
+    ## provided 13 variables to replace 12 variables
+
+    ## Warning in dht2(ddf = structure(list(call = ddf(dsmodel = ~cds(key = "hn", : One
+    ## or more strata have only one transect, cannot calculate empirical encounter rate
+    ## variance
+
+    ## Warning in `[<-.data.frame`(`*tmp*`, flatfile$Sample.Label %in% sl_diff, :
+    ## provided 13 variables to replace 12 variables
+
+    ## Warning in dht2(df_dove_hn_cos_200_bin, flatfile = doves, strat_formula =
+    ## ~Region.Label): One or more strata have only one transect, cannot calculate
+    ## empirical encounter rate variance
+
+Plot some trends?
+
+``` r
+library(ggplot2)
+year_site_abund_plot <- as.data.frame(attr(year_site_abund, "density"))
+year_site_abund_plot$year <- as.numeric(sub("^.{4}-", "", year_site_abund_plot$Region.Label))
+```
+
+    ## Warning: NAs introduced by coercion
+
+``` r
+year_site_abund_plot$site <- sub("-\\d{4}", "", year_site_abund_plot$Region.Label)
+
+ggplot(year_site_abund_plot) +
+  geom_line(aes(x=year, y=Density, colour=site, group=site)) +
+  theme_minimal()
+```
+
+    ## Warning: Removed 1 row(s) containing missing values (geom_path).
+
+![](birds_files/figure-gfm/unnamed-chunk-24-1.png)<!-- -->
